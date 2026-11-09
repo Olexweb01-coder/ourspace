@@ -1,0 +1,53 @@
+# Our Space — a private space for two
+
+End-to-end encrypted PWA. Next.js 15 on Vercel, Neon Postgres. Built by olexweb.
+
+## How the lock works
+- The shared password never leaves either phone. Each phone turns it into two keys (PBKDF2, 600k rounds → HKDF):
+  an **encryption key** that stays in memory, and an **auth token** that proves the password to the server.
+- The server stores only `sha256(auth token)` and ciphertext. It cannot read messages, and push notifications never contain text.
+- The app asks for the password every time it opens and locks itself after 2 minutes in the background.
+- 10 wrong passwords lock the space for 15 minutes.
+- **There is no password reset.** Lose it and the messages are gone for good. That's the point.
+
+## Setup (once)
+1. **Neon**: create a project, open the SQL editor, run `db/schema.sql`. Copy the **pooled** connection string.
+2. `npm install`, then `npm run vapid` and keep both keys.
+3. Push to GitHub, import the repo in Vercel, add every variable from `.env.example`, deploy.
+   Use a real HTTPS domain for `APP_URL`, e.g. `https://love.olexweb.com`.
+4. Open `APP_URL/setup` on **your** phone, enter `HOST_SETUP_KEY`, your name, her name and the password.
+5. Send her the invite link. Tell her the password in person or on a call.
+
+### What she does
+1. Opens the link (Safari on iPhone, Chrome on Android), types her name and the password.
+2. Adds Our Space to her Home Screen (iPhone: Share → Add to Home Screen).
+3. Opens it from the Home Screen, unlocks, taps **Turn on notifications**.
+   On iPhone, notifications only work from the Home Screen app (iOS 16.4+).
+
+Do the same yourself: after setup, add the app to your Home Screen from the chat screen.
+
+## Admin API (for the olexweb admin app)
+Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
+
+| Method | Path | Body | Does |
+|---|---|---|---|
+| GET | `/api/admin/spaces` | – | Lists every space (max 5), both people, last seen, notification state |
+| POST | `/api/admin/spaces/:id/invite` | `{ "role": "partner" }` | New 7-day link (new partner, or her new phone) |
+| PATCH | `/api/admin/spaces/:id` | `{ "action": "ban" \| "unban" }` | Ban signs her out on every device instantly |
+| DELETE | `/api/admin/spaces/:id` | `{ "confirm": "DELETE <label>" }` | Permanent erase. Call once with no body to see what will be lost and the exact phrase |
+
+New spaces are created at `/setup` on your phone, not from the admin, so the password never touches olexweb.
+
+```ts
+// olexweb admin – server side
+const res = await fetch(`${process.env.US_APP_URL}/api/admin/spaces`, {
+  headers: { Authorization: `Bearer ${process.env.US_ADMIN_API_KEY}` },
+  cache: "no-store",
+});
+```
+
+## Honest limits
+- Anyone with the password and an unlocked phone can read everything. Pick a long password.
+- A web app can't block screenshots, including of view-once messages.
+- The server sees metadata: who sent something and when, never what.
+- New messages arrive by checking every 2.5 s while the app is open, plus a push when it's closed.

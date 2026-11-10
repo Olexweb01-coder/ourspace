@@ -462,3 +462,104 @@ body:has(.chat[data-theme="midnight"]) { background: #0e1022; }
 .chat[data-theme="blush"] .media-card__icon svg { fill: #fff; }
 .chat[data-theme="blush"] .voice__track { background: rgba(59, 21, 38, 0.12); }
 .chat[data-theme="blush"] .meter { background: rgba(59, 21, 38, 0.12); }
+
+/* ---------- Phase 3: streak pill ---------- */
+.chat__nameRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.streak-pill {
+  display: inline-flex; align-items: center; gap: 4px; border: 0; flex-shrink: 0;
+  padding: 3px 9px 3px 7px; border-radius: 999px; font-size: 0.82rem; font-weight: 700;
+  background: rgba(246, 201, 127, 0.14); color: var(--candle); font-variant-numeric: tabular-nums;
+}
+.streak-pill svg { width: 13px; height: 13px; fill: currentColor; opacity: 0.55; }
+.streak-pill--done svg { opacity: 1; }
+
+/* ---------- daily feelings ---------- */
+.mood-card {
+  margin: 8px 12px 0; padding: 14px 16px; border-radius: 20px;
+  background: var(--plum); box-shadow: inset 0 0 0 1px rgba(246, 201, 127, 0.18);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.mood-card__title { margin: 0; font-family: var(--font-display), Georgia, serif; font-style: italic; font-size: 1.25rem; line-height: 1.2; }
+.mood-card .hint { margin: 0; }
+.mood-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.mood {
+  --mood: var(--rose);
+  display: inline-flex; align-items: center; gap: 8px; border: 0; padding: 10px 14px; border-radius: 999px;
+  background: color-mix(in srgb, var(--mood) 14%, transparent); color: var(--blush); font-size: 0.95rem; position: relative;
+}
+.mood--on { background: var(--mood); color: #24101a; font-weight: 600; }
+.mood__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--mood); flex-shrink: 0; }
+.mood--on .mood__dot { background: #24101a; }
+.mood__guess { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--candle); margin-left: 2px; }
+
+.moodstrip { margin: 8px 12px 0; display: flex; flex-direction: column; gap: 6px; }
+.moodstrip__them {
+  --mood: var(--rose);
+  margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--mood) 16%, transparent); font-size: 0.9rem;
+}
+.moodstrip__them .mood__dot { transform: translateY(1px); }
+.moodstrip__me { align-self: flex-start; border: 0; background: none; color: var(--muted); font-size: 0.82rem; padding: 0 4px; display: inline-flex; gap: 8px; align-items: baseline; }
+
+.away-card {
+  margin: 8px 12px 0; padding: 12px 14px; border-radius: 14px;
+  background: rgba(201, 160, 232, 0.12); box-shadow: inset 0 0 0 1px rgba(201, 160, 232, 0.25);
+}
+.away-card p { margin: 0; }
+.away-card .hint { margin-top: 4px; }
+
+/* ---------- streak sheet ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 9; background: rgba(10, 4, 8, 0.6);
+  display: flex; align-items: flex-end; justify-content: center; padding: 12px;
+}
+.streak-sheet {
+  width: 100%; max-width: 420px; background: var(--plum-2); border-radius: 24px;
+  padding: 26px 22px calc(env(safe-area-inset-bottom) + 18px); text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.streak-sheet__num { margin: 0; font-family: var(--font-display), Georgia, serif; font-size: 4.5rem; line-height: 1; color: var(--candle); font-variant-numeric: tabular-nums; }
+.streak-sheet__label { margin: 0 0 10px; font-family: var(--font-display), Georgia, serif; font-style: italic; color: var(--muted); }
+.streak-sheet__status { margin: 0 0 12px; max-width: 30ch; }
+.streak-sheet__facts { display: flex; gap: 24px; margin: 0 0 8px; }
+.streak-sheet__facts div { display: flex; flex-direction: column; }
+.streak-sheet__facts dt { font-size: 0.75rem; color: var(--muted); }
+.streak-sheet__facts dd { margin: 0; font-weight: 600; }
+
+/* ---------- milestone celebration ---------- */
+.celebrate {
+  position: fixed; inset: 0; z-index: 12; overflow: hidden;
+  background: radial-gradient(90% 60% at 50% 40%, #5a1d3a 0%, #1d0f18 70%);
+  color: #f8e3e8; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 32px 24px calc(env(safe-area-inset-bottom) + 32px); text-align: center;
+}
+.celebrate__kicker { margin: 0; font-size: 0.85rem; letter-spacing: 0.14em; text-transform: uppercase; color: #f6c97f; position: relative; }
+.celebrate__num {
+  margin: 4px 0 0; font-family: var(--font-display), Georgia, serif; font-weight: 600;
+  font-size: clamp(6rem, 34vw, 11rem); line-height: 0.95; color: #f6c97f; position: relative;
+  animation: pop 0.9s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.celebrate__label { margin: 0; font-family: var(--font-display), Georgia, serif; font-style: italic; font-size: 1.6rem; position: relative; }
+.celebrate__line { margin: 18px 0 28px; max-width: 28ch; color: #e8c7d1; position: relative; }
+.celebrate__btn { max-width: 320px; position: relative; }
+.celebrate__rings { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.celebrate__rings span {
+  grid-area: 1 / 1; width: 60vmin; height: 60vmin; border-radius: 50%;
+  border: 1px solid rgba(246, 201, 127, 0.35); animation: ring 3.2s ease-out infinite;
+}
+.celebrate__rings span:nth-child(2) { animation-delay: 1.05s; }
+.celebrate__rings span:nth-child(3) { animation-delay: 2.1s; }
+.hearts--loop span { animation: rise 3.4s ease-out infinite; }
+@keyframes pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes ring { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .celebrate__num, .celebrate__rings span { animation: none; }
+  .celebrate__rings { display: none; }
+}
+.chat[data-theme="blush"] .mood { color: var(--blush); }
+.chat[data-theme="blush"] .streak-pill { background: rgba(168, 102, 28, 0.12); }
+
+/* Celebration: hearts drift behind the words, never over them */
+.celebrate .hearts { z-index: 0; }
+.celebrate__kicker, .celebrate__num, .celebrate__label, .celebrate__line, .celebrate__btn { z-index: 1; }
+.celebrate__rings { z-index: 0; }

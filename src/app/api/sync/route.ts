@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { fail, json } from "@/lib/server-utils";
+import { computeStreak } from "@/lib/rituals";
 import { getMe } from "@/lib/session";
 
 // One round trip: purge expired, mark me as seen, fetch changes + who's around.
@@ -42,10 +43,25 @@ export async function GET(req: Request) {
             order by id::bigint asc`,
     sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at, avatar_media_id
         from members where space_id = ${me.spaceId}`,
-    sql`select label, disappear_seconds, theme, background_media_id from spaces where id = ${me.spaceId}`,
+    sql`select label, disappear_seconds, theme, background_media_id, best_streak from spaces where id = ${me.spaceId}`,
+    sql`select day::text as day from activity_days
+        where space_id = ${me.spaceId} and day > current_date - 800
+        group by day having count(distinct member_id) >= 2 order by day desc`,
+    sql`with t as (
+          select (now() at time zone coalesce(
+            (select timezone from members where space_id = ${me.spaceId} and role = 'host'), 'Africa/Lagos'))::date as today)
+        select t.today::text as today,
+               coalesce((select array_agg(member_id::text) from activity_days a
+                         where a.space_id = ${me.spaceId} and a.day = t.today), '{}') as sent_today
+        from t`,
+    sql`select member_id, day::text as day, iv, ciphertext, updated_at from moods
+        where space_id = ${me.spaceId} and day >= current_date - 8 order by day`,
   ]);
 
-  const [, , nowRows, messages, members, spaces] = results;
+  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods] = results;
+  const completeDays = streakDays.map((d) => d.day as string);
+  const today = todayRows[0].today as string;
+  const st = computeStreak(completeDays, today);
   return json({
     now: nowRows[0].now,
     me: { id: me.memberId, role: me.role, name: me.name, spaceId: me.spaceId },
@@ -65,6 +81,14 @@ export async function GET(req: Request) {
       theme: spaces[0]?.theme ?? "candle",
       backgroundMediaId: spaces[0]?.background_media_id ?? null,
     },
+    streak: {
+      today,
+      current: st.current,
+      best: Math.max(Number(spaces[0]?.best_streak ?? 0), st.longest, st.current),
+      todayDone: st.todayDone,
+      sentToday: todayRows[0].sent_today as string[],
+    },
+    moods: moods.map((m) => ({ memberId: m.member_id, day: m.day, iv: m.iv, ct: m.ciphertext, updatedAt: m.updated_at })),
     messages: messages.map((r) => ({
       id: r.id,
       senderId: r.sender_id,

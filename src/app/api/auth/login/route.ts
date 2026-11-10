@@ -2,9 +2,10 @@ import { db } from "@/lib/db";
 import { checkSpacePassword, passwordError } from "@/lib/password";
 import { B64_RE, fail, json, readJson, str, UUID_RE } from "@/lib/server-utils";
 import { createSession } from "@/lib/session";
+import { saveTimezone } from "@/lib/streak-server";
 
 export async function POST(req: Request) {
-  const body = await readJson<{ spaceId?: string; memberId?: string; authToken?: string }>(req);
+  const body = await readJson<{ spaceId?: string; memberId?: string; authToken?: string; tz?: string }>(req);
   const spaceId = body?.spaceId ?? "";
   const memberId = body?.memberId ?? "";
   const authToken = str(body?.authToken, 64);
@@ -27,5 +28,6 @@ export async function POST(req: Request) {
   }
 
   await createSession(memberId);
+  await saveTimezone(memberId, body?.tz);
   return json({ ok: true, role: m.role, name: m.display_name, label: m.label });
 }

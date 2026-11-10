@@ -2,9 +2,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import BondMark from "@/components/BondMark";
+import Celebration from "@/components/Celebration";
 import InviteBox from "@/components/InviteBox";
 import MediaBubble, { type MediaState } from "@/components/MediaBubble";
 import MediaViewer from "@/components/MediaViewer";
+import MoodCard from "@/components/MoodCard";
+import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
 import { APP_NAME } from "@/lib/brand";
@@ -16,6 +19,7 @@ import {
   compressImage, forgetAllMediaUrls, forgetMediaUrl, formatBytes, mediaUrl, uploadEncrypted, type MediaPayload,
 } from "@/lib/media-client";
 import { MAX_BYTES, type Theme } from "@/lib/media-limits";
+import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from "@/lib/rituals";
 import { enableNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, type Vault } from "@/lib/vault";
 
@@ -31,14 +35,19 @@ type Msg = {
   media: MediaState;
 };
 type Space = { label: string; disappearSeconds: number | null; theme: Theme; backgroundMediaId: string | null };
+type MoodRow = { memberId: string; day: string; iv: string; ct: string; updatedAt: string };
+type Mood = { memberId: string; day: string; key: MoodKey; updatedAt: string };
+type Streak = { today: string; current: number; best: number; todayDone: boolean; sentToday: string[] };
 type SyncResponse = {
   now: string;
+  streak: Streak;
+  moods: MoodRow[];
   me: { id: string; role: "host" | "partner"; name: string; spaceId: string };
   members: Member[];
   space: Space;
   messages: Msg[];
 };
-type Info = Omit<SyncResponse, "messages" | "now">;
+type Info = Omit<SyncResponse, "messages" | "now" | "moods">;
 type TextPayload = { t: "text"; body: string };
 type Payload = TextPayload | MediaPayload;
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
@@ -94,6 +103,13 @@ export default function ChatPage() {
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [busySetting, setBusySetting] = useState<string | null>(null);
+  const [moods, setMoods] = useState<Mood[]>([]);
+  const moodCache = useRef(new Map<string, MoodKey | null>());
+  const [moodLater, setMoodLater] = useState(false);
+  const [moodOpen, setMoodOpen] = useState(false);
+  const [streakOpen, setStreakOpen] = useState(false);
+  const [celebrate, setCelebrate] = useState<number | null>(null);
+  const prevDone = useRef<boolean | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -146,6 +162,26 @@ export default function ChatPage() {
     bump();
   }, []);
 
+  const decryptMoods = useCallback(async (rows: MoodRow[]) => {
+    const v = vaultRef.current;
+    if (!v) return;
+    const out: Mood[] = [];
+    for (const r of rows) {
+      const k = `${r.memberId}:${r.day}:${r.iv}`;
+      if (!moodCache.current.has(k)) {
+        try {
+          const p = await decryptJSON<{ mood: string }>(v.encKey, r.iv, r.ct, moodAad(v.spaceId, r.memberId, r.day));
+          moodCache.current.set(k, moodOf(p.mood)?.key ?? null);
+        } catch {
+          moodCache.current.set(k, null);
+        }
+      }
+      const key = moodCache.current.get(k);
+      if (key) out.push({ memberId: r.memberId, day: r.day, key, updatedAt: r.updatedAt });
+    }
+    setMoods((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+  }, []);
+
   // ---------- sync ----------
   const syncNow = useCallback(async () => {
     if (!vaultRef.current) return;
@@ -155,7 +191,8 @@ export default function ChatPage() {
       const q = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
-      setInfo({ me: data.me, members: data.members, space: data.space });
+      setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak });
+      void decryptMoods(data.moods ?? []);
       if (data.messages.length) {
         setMsgs((prev) => {
           const next = new Map(prev);
@@ -170,7 +207,7 @@ export default function ChatPage() {
       syncing.current = false;
       if (syncAgain.current) { syncAgain.current = false; void syncNow(); }
     }
-  }, [decryptList, lockOut]);
+  }, [decryptList, decryptMoods, lockOut]);
 
   useEffect(() => {
     if (!ready) return;
@@ -242,6 +279,22 @@ export default function ChatPage() {
     }
   }, [partner?.lastNudgeAt, partner?.name, info]);
 
+  // Milestones get the full celebration once per phone; any completed day gets a little toast.
+  const streak = info?.streak ?? null;
+  useEffect(() => {
+    if (!streak || !info) return;
+    if (streak.todayDone && isMilestone(streak.current)) {
+      const key = `ourspace:celebrated:${info.me.spaceId}:${streak.current}:${streak.today}`;
+      try {
+        if (!localStorage.getItem(key)) { localStorage.setItem(key, "1"); setCelebrate(streak.current); }
+      } catch { /* private mode */ }
+    } else if (prevDone.current === false && streak.todayDone && streak.current > 0) {
+      setToast(`Day ${streak.current} together ${LOVE}`);
+    }
+    prevDone.current = streak.todayDone;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streak?.todayDone, streak?.current]);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3400);
@@ -294,6 +347,7 @@ export default function ChatPage() {
     payloads.current.set(res.id, payload);
     addLocal(v, res.id, payload.t, res, iv, ct, sentOnce, mediaId);
     setViewOnce(false);
+    void syncNow();
   }
 
   async function send(e?: FormEvent) {
@@ -481,6 +535,22 @@ export default function ChatPage() {
     setOnce(null);
   }
 
+  async function pickMood(key: MoodKey) {
+    const v = vaultRef.current;
+    if (!v) return;
+    const day = localDay();
+    try {
+      const { iv, ct } = await encryptJSON(v.encKey, { mood: key }, moodAad(v.spaceId, v.memberId, day));
+      await api("/api/moods", { body: { day, iv, ct } });
+      const now = new Date().toISOString();
+      setMoods((prev) => [...prev.filter((m) => !(m.memberId === v.memberId && m.day === day)), { memberId: v.memberId, day, key, updatedAt: now }]);
+      setMoodOpen(false);
+      setToast(`${partner?.name ?? "They"} will see you feel ${moodOf(key)?.label.toLowerCase()} today`);
+    } catch (err) {
+      setToast(err instanceof ApiError ? err.message : "Couldn't save that. Try again.");
+    }
+  }
+
   // ---------- header actions & settings ----------
   async function nudge() {
     try {
@@ -583,6 +653,27 @@ export default function ChatPage() {
   const myAvatar = info.members.find((m) => m.id === me.id)?.avatarMediaId ?? null;
   const usedPct = usage ? Math.min(100, Math.round((usage.totalBytes / usage.limitBytes) * 100)) : 0;
 
+  const today = localDay();
+  const myMood = moods.find((m) => m.memberId === me.id && m.day === today)?.key ?? null;
+  const partnerMoodRow = partner
+    ? moods.filter((m) => m.memberId === partner.id && Date.now() - new Date(m.updatedAt).getTime() < 24 * 3600_000)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
+    : null;
+  const partnerMood = partnerMoodRow ? moodOf(partnerMoodRow.key) : null;
+  const awayDays = partner?.lastSeenAt ? Math.floor((Date.now() - new Date(partner.lastSeenAt).getTime()) / 86_400_000) : 0;
+  const angryLately = Array.from(msgs.values()).some((m) => m.reactions[me.id] === "angry" && Date.now() - new Date(m.createdAt).getTime() < 86_400_000);
+  const guesses = guessMoods({
+    hour: new Date().getHours(),
+    recent: moods.filter((m) => m.memberId === me.id && m.day !== today).sort((a, b) => b.day.localeCompare(a.day)).map((m) => m.key),
+    apartDays: awayDays,
+    angryLately,
+    partnerMood: partnerMoodRow?.key ?? null,
+  });
+  const showMoodCard = !!partner && (moodOpen || (!myMood && !moodLater));
+  const st = info.streak;
+  const iSentToday = st.sentToday.includes(me.id);
+  const streakAtRisk = !!partner && st.current >= 2 && !st.todayDone && new Date().getHours() >= 18;
+
   let lastDay = "";
   return (
     <main className="chat" data-theme={info.space.theme}>
@@ -599,7 +690,16 @@ export default function ChatPage() {
           title={`${me.name} and ${partnerName}`}
         />
         <div className="chat__who">
-          <h1 className="chat__name">{partnerName}</h1>
+          <div className="chat__nameRow">
+            <h1 className="chat__name">{partnerName}</h1>
+            {partner && (
+              <button type="button" className={st.todayDone ? "streak-pill streak-pill--done" : "streak-pill"} onClick={() => setStreakOpen(true)}
+                aria-label={`${st.current} day streak. Open streak details`}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>
+                {st.current}
+              </button>
+            )}
+          </div>
           <p className={online ? "chat__status chat__status--live" : "chat__status"}>
             {partner ? sinceLabel(partner.lastSeenAt) : "hasn't joined yet"}
             {partner?.notifications === "off" && <span className="pill">notifications off</span>}
@@ -710,6 +810,48 @@ export default function ChatPage() {
         <div className="banner">
           {notif === "off" ? `Notifications are off here, and ${partnerName} can see that.` : "Turn on notifications so nudges and messages reach you."}
           <button className="btn btn--small" onClick={turnOnNotifications}>Turn on</button>
+        </div>
+      )}
+      {(partnerMood || (myMood && !showMoodCard)) && (
+        <div className="moodstrip">
+          {partnerMood && partner && (
+            <p className="moodstrip__them" style={{ ["--mood" as string]: partnerMood.color }}>
+              <span className="mood__dot" aria-hidden="true" />
+              <span><strong>{partner.name} feels {partnerMood.label.toLowerCase()}.</strong> {partnerMood.hint(partner.name)}</span>
+            </p>
+          )}
+          {!showMoodCard && (
+            <button type="button" className="moodstrip__me" onClick={() => setMoodOpen(true)}>
+              {myMood ? <>You: {moodOf(myMood)?.label} <span className="link-btn">Change</span></> : <span className="link-btn">Share how you feel today</span>}
+            </button>
+          )}
+        </div>
+      )}
+      {showMoodCard && (
+        <MoodCard
+          myName={me.name}
+          partnerName={partnerName}
+          guesses={guesses}
+          current={myMood}
+          onPick={pickMood}
+          onLater={() => { setMoodLater(true); setMoodOpen(false); }}
+        />
+      )}
+      {streakAtRisk && (
+        <div className="banner banner--warm">
+          {iSentToday
+            ? `Waiting on ${partnerName}. Your ${st.current}-day streak ends at midnight.`
+            : `Your ${st.current}-day streak ends at midnight. Send ${partnerName} something.`}
+        </div>
+      )}
+      {partner && awayDays >= 1 && (
+        <div className="away-card">
+          <p><strong>{partner.name} has been away {awayDays} {awayDays === 1 ? "day" : "days"}.</strong></p>
+          <p className="hint">
+            {partner.notifications === "off"
+              ? `${partner.name}'s notifications are off, so nothing will alert them. Everything you send will be here when they're back.`
+              : `Every message will reach ${partner.name}, along with a little reminder that you miss each other.`}
+          </p>
         </div>
       )}
       {welcome && (
@@ -887,6 +1029,13 @@ export default function ChatPage() {
             <span key={i} style={{ left: `${(i * 7 + 4) % 96}%`, animationDelay: `${(i % 7) * 0.12}s` }}>{LOVE}</span>
           ))}
         </div>
+      )}
+
+      {streakOpen && (
+        <StreakSheet current={st.current} best={st.best} todayDone={st.todayDone} iSent={iSentToday} partnerName={partnerName} onClose={() => setStreakOpen(false)} />
+      )}
+      {celebrate !== null && (
+        <Celebration days={celebrate} names={`${host?.name ?? ""} & ${guest?.name ?? info.space.label}`} onClose={() => setCelebrate(null)} />
       )}
 
       {toast && <div className="toast" role="status">{toast}</div>}

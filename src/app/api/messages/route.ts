@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { MEDIA_DAYS } from "@/lib/media-limits";
 import { claimMedia } from "@/lib/media-server";
 import { pushTo } from "@/lib/push";
+import { isMilestone } from "@/lib/rituals";
+import { getStreak } from "@/lib/streak-server";
 import { B64_RE, fail, json, readJson } from "@/lib/server-utils";
 import { getMe, getPartnerId } from "@/lib/session";
 
@@ -60,11 +62,37 @@ export async function POST(req: Request) {
   }
 
   const partnerId = await getPartnerId(me);
+
+  // Streaks: the first thing each of you sends on a day counts. When the second person sends, the day is complete.
+  const firstToday = await sql`
+    insert into activity_days (space_id, member_id, day)
+    select ${me.spaceId}, ${me.memberId}, (now() at time zone h.timezone)::date
+    from members h where h.space_id = ${me.spaceId} and h.role = 'host'
+    on conflict do nothing
+    returning day`;
+  let streak: { current: number; todayDone: boolean } | null = null;
+  if (firstToday[0]) {
+    const s = await getStreak(me.spaceId);
+    streak = { current: s.current, todayDone: s.todayDone };
+    if (s.todayDone) {
+      await sql`update spaces set best_streak = greatest(best_streak, ${s.current}) where id = ${me.spaceId}`;
+      if (isMilestone(s.current) && partnerId) {
+        const names = await sql`select id, display_name from members where space_id = ${me.spaceId}`;
+        const nameOf = (id: string) => names.find((n) => n.id === id)?.display_name ?? "your love";
+        const n = s.current;
+        after(async () => {
+          await pushTo(me.memberId, { title: `❤️ ${n} days in a row`, body: `You and ${nameOf(partnerId)} haven't missed a day. Come celebrate.`, tag: "milestone" });
+          await pushTo(partnerId, { title: `❤️ ${n} days in a row`, body: `You and ${me.name} haven't missed a day. Come celebrate.`, tag: "milestone" });
+        });
+      }
+    }
+  }
+
   after(() => pushTo(partnerId, {
     title: `💌 ${me.name}`,
     body: viewOnce ? "Sent you something to see once." : PUSH_BODY[kind],
     tag: "message",
   }));
 
-  return json({ id: msg.id, createdAt: msg.created_at, expiresAt: msg.expires_at, mediaExpiresAt });
+  return json({ id: msg.id, createdAt: msg.created_at, expiresAt: msg.expires_at, mediaExpiresAt, streak });
 }

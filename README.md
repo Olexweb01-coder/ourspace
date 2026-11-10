@@ -38,6 +38,18 @@ Do the same yourself: after setup, add the app to your Home Screen from the chat
 Setup: run `db/002_media.sql` once in Neon. For local testing, copy `BLOB_READ_WRITE_TOKEN` from
 Vercel → Settings → Environment Variables into `.env.local`.
 
+## Daily rituals (Phase 3)
+- **Feelings:** once a day each of you picks how you feel. The app puts its best guess first, worked out on the phone
+  from recent feelings, the time, time apart and recent 😠 reactions. No AI. Feelings are encrypted, and the
+  notification never says which one.
+- **Streaks:** a day counts when you both send something, even if the message later disappears. Days follow the
+  host's time zone. Celebrations come at 3, 7, 14, 30, 50, 100, 150, 200 and 365 days, then every 100.
+- **Evening job** (`/api/cron/daily`, 19:00 UTC = 20:00 Lagos): warns whoever hasn't sent anything when a streak
+  of 2+ days would break at midnight, sends "misses you" on days 1, 2, 3, 5 and 7 away (then weekly),
+  and cleans up expired files. On the free plan Vercel may run it at any minute within that hour.
+
+Setup: run `db/003_rituals.sql` once in Neon.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

@@ -2,12 +2,13 @@ import { db } from "@/lib/db";
 import { createInvite } from "@/lib/invites";
 import { appUrl, B64_RE, fail, json, readJson, safeEqual, sha256, str } from "@/lib/server-utils";
 import { createSession } from "@/lib/session";
+import { saveTimezone } from "@/lib/streak-server";
 
 const MAX_SPACES = 5;
 
 type Body = {
   setupKey?: string; label?: string; hostName?: string;
-  salt?: string; iterations?: number; authToken?: string;
+  salt?: string; iterations?: number; authToken?: string; tz?: string;
 };
 
 export async function POST(req: Request) {
@@ -46,5 +47,6 @@ export async function POST(req: Request) {
 
   const invite = await createInvite(spaceId, "partner", appUrl(req));
   await createSession(memberId);
+  await saveTimezone(memberId, body.tz);
   return json({ spaceId, memberId, ...invite });
 }

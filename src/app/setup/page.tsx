@@ -33,7 +33,7 @@ export default function SetupPage() {
       const salt = newSalt();
       const { encKey, authToken } = await deriveKeys(password, salt, KDF_ITERATIONS);
       const res = await api<Done>("/api/setup", {
-        body: { setupKey, hostName, label, salt, iterations: KDF_ITERATIONS, authToken },
+        body: { setupKey, hostName, label, salt, iterations: KDF_ITERATIONS, authToken, tz: Intl.DateTimeFormat().resolvedOptions().timeZone },
       });
       rememberSpace({ spaceId: res.spaceId, memberId: res.memberId, label, myName: hostName });
       setVault({ encKey, spaceId: res.spaceId, memberId: res.memberId });

@@ -53,7 +53,7 @@ export default function UnlockPage() {
       const { salt, iterations } = await api<{ salt: string; iterations: number }>(`/api/auth/salt?spaceId=${current.spaceId}`);
       const { encKey, authToken } = await deriveKeys(password, salt, iterations);
       const res = await api<{ name: string; label: string }>("/api/auth/login", {
-        body: { spaceId: current.spaceId, memberId: current.memberId, authToken },
+        body: { spaceId: current.spaceId, memberId: current.memberId, authToken, tz: Intl.DateTimeFormat().resolvedOptions().timeZone },
       });
       rememberSpace({ ...current, label: res.label, myName: res.name });
       setVault({ encKey, spaceId: current.spaceId, memberId: current.memberId });

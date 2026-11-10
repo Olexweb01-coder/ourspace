@@ -346,3 +346,119 @@ button:disabled { cursor: default; opacity: 0.45; }
   .bond--alive .bond__heart, .hearts span { animation: none; }
   .hearts { display: none; }
 }
+
+/* ---------- Phase 2: themes ----------
+   Candlelight is the default. Each theme only swaps the colour tokens. */
+.chat[data-theme="rose"] {
+  --ink: #2a0f1c; --plum: #3d1729; --plum-2: #4c1d33; --wine: #a3335d; --rose: #ff9db5; --candle: #ffd3a1;
+}
+.chat[data-theme="midnight"] {
+  --ink: #0e1022; --plum: #1b1d36; --plum-2: #25284a; --wine: #3a2f6e; --rose: #b8a4ff; --candle: #f6c97f; --muted: #a49fc4;
+}
+.chat[data-theme="blush"] {
+  --ink: #fbeff2; --plum: #ffffff; --plum-2: #ffffff; --wine: #c2416b; --rose: #c2416b; --blush: #3b1526;
+  --candle: #a8661c; --muted: #8a6573; color-scheme: light;
+}
+.chat[data-theme] { background: var(--ink); color: var(--blush); }
+.chat[data-theme="blush"] .msg--mine .bubble:not(.bubble--once) { color: #fff; }
+.chat[data-theme="blush"] .chat__head,
+.chat[data-theme="blush"] .composer { background: rgba(251, 239, 242, 0.9); }
+.chat[data-theme="blush"] .btn:not(.btn--ghost), .chat[data-theme="blush"] .send svg { color: #fff; fill: #fff; }
+.chat[data-theme="blush"] .icon-btn svg { fill: var(--blush); }
+.chat[data-theme="blush"] .icon-btn--heart svg { fill: var(--rose); }
+.chat[data-theme="blush"] .composer__input, .chat[data-theme="blush"] .chip { background: rgba(59, 21, 38, 0.06); }
+.chat[data-theme="blush"] .chip--on { background: var(--blush); color: #fff; }
+
+/* A chosen photo behind the chat, dimmed so words stay readable */
+.chat { isolation: isolate; }
+.chat__bg { position: absolute; inset: 0; z-index: -1; background-size: cover; background-position: center; }
+.chat__bg::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--ink) 72%, transparent); }
+
+/* ---------- media in messages ---------- */
+.bubble--media { padding: 4px; display: flex; flex-direction: column; gap: 2px; max-width: min(78%, 300px); width: 100%; }
+.msg--mine .bubble--media { background: var(--wine); }
+.media { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.photo {
+  display: block; width: 100%; border: 0; padding: 0; border-radius: 16px; overflow: hidden;
+  background: var(--plum-2) center / cover no-repeat; position: relative;
+}
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.media-card {
+  display: flex; align-items: center; gap: 12px; border: 0; text-align: left; width: 100%;
+  background: rgba(0, 0, 0, 0.18); border-radius: 14px; padding: 10px 12px; color: inherit;
+}
+.media-card__icon { width: 40px; height: 40px; border-radius: 50%; background: var(--rose); display: grid; place-items: center; flex-shrink: 0; }
+.media-card__icon svg { width: 20px; height: 20px; fill: #2a0d1b; }
+.media-card__text { display: flex; flex-direction: column; min-width: 0; font-size: 0.9rem; }
+.media-card__text strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.media-card__text span { color: var(--muted); font-size: 0.8rem; }
+.media-caption { margin: 2px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.voice { display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px; }
+.voice__play { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--rose); display: grid; place-items: center; flex-shrink: 0; }
+.voice__play svg { width: 18px; height: 18px; fill: #2a0d1b; }
+.voice__track { flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+.voice__track span { display: block; height: 100%; background: var(--candle); }
+.voice__time { font-size: 0.8rem; color: var(--muted); min-width: 34px; text-align: right; }
+.keep-line { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--muted); padding: 0 8px 4px; }
+.keep-line > span { flex: 1; }
+.link-btn { border: 0; background: none; padding: 2px 0; color: var(--candle); font-size: 0.78rem; font-weight: 600; }
+.link-btn--quiet { color: var(--muted); font-weight: 500; }
+.uploading { display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
+
+/* storage bar, also used for upload progress */
+.meter { display: block; width: 100%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--candle); transition: width 0.3s; }
+
+/* ---------- full-screen viewer ---------- */
+.viewer {
+  position: fixed; inset: 0; z-index: 10; background: #0c0509;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+  color: #f8e3e8;
+}
+.viewer__stage { flex: 1; min-height: 0; width: 100%; display: grid; place-items: center; }
+.viewer__media { max-width: 100%; max-height: 100%; border-radius: 12px; object-fit: contain; }
+.viewer__caption { margin: 0; text-align: center; max-width: 40ch; }
+.viewer__bar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.viewer .btn--ghost { color: #f8e3e8; }
+
+/* ---------- composer extras ---------- */
+.attach {
+  position: absolute; left: 10px; bottom: calc(env(safe-area-inset-bottom) + 66px); z-index: 4;
+  display: flex; flex-direction: column; background: var(--plum-2); border-radius: 16px; padding: 6px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.attach button { border: 0; background: transparent; color: var(--blush); text-align: left; padding: 12px 16px; border-radius: 10px; font-size: 0.98rem; }
+.attach button:active { background: rgba(255, 255, 255, 0.06); }
+.recorder {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 8px calc(env(safe-area-inset-bottom) + 8px) 12px;
+  background: rgba(29, 15, 24, 0.92); border-top: 1px solid rgba(248, 227, 232, 0.07);
+}
+.recorder__dot { width: 10px; height: 10px; border-radius: 50%; background: #ff5d6c; animation: rec 1.2s ease-in-out infinite; }
+.recorder__time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.recorder__hint { flex: 1; color: var(--muted); font-size: 0.8rem; }
+@keyframes rec { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .recorder__dot { animation: none; } }
+
+body:has(.chat[data-theme="blush"]) { background: #fbeff2; }
+body:has(.chat[data-theme="midnight"]) { background: #0e1022; }
+
+/* Blush is light: keep everything on your own pink bubbles readable */
+.chat[data-theme="blush"] .msg--mine .bubble--media,
+.chat[data-theme="blush"] .msg--mine .keep-line,
+.chat[data-theme="blush"] .msg--mine .link-btn,
+.chat[data-theme="blush"] .msg--mine .voice__time,
+.chat[data-theme="blush"] .msg--mine .media-card__text span { color: #fff; }
+.chat[data-theme="blush"] .msg--mine .voice__play,
+.chat[data-theme="blush"] .msg--mine .media-card__icon { background: #fff; }
+.chat[data-theme="blush"] .msg--mine .voice__play svg,
+.chat[data-theme="blush"] .msg--mine .media-card__icon svg { fill: var(--wine); }
+.chat[data-theme="blush"] .msg--mine .voice__track { background: rgba(255, 255, 255, 0.3); }
+.chat[data-theme="blush"] .msg--mine .voice__track span { background: #fff; }
+.chat[data-theme="blush"] .media-card { background: rgba(59, 21, 38, 0.06); }
+.chat[data-theme="blush"] .msg--mine .media-card { background: rgba(255, 255, 255, 0.16); }
+.chat[data-theme="blush"] .voice__play svg,
+.chat[data-theme="blush"] .media-card__icon svg { fill: #fff; }
+.chat[data-theme="blush"] .voice__track { background: rgba(59, 21, 38, 0.12); }
+.chat[data-theme="blush"] .meter { background: rgba(59, 21, 38, 0.12); }

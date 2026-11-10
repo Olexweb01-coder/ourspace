@@ -1,5 +1,6 @@
 import { isAdmin } from "@/lib/admin";
 import { db } from "@/lib/db";
+import { deleteBlobs } from "@/lib/media-server";
 import { fail, json, readJson, UUID_RE } from "@/lib/server-utils";
 
 // PATCH { action: "ban" | "unban", role?: "partner" | "host" }
@@ -42,7 +43,8 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   const info = await sql`
     select s.label,
            (select count(*)::int from messages where space_id = s.id) as messages,
-           (select string_agg(display_name, ' & ') from members where space_id = s.id) as people
+           (select string_agg(display_name, ' & ') from members where space_id = s.id) as people,
+           (select count(*)::int from media where space_id = s.id) as files
     from spaces s where s.id = ${id}`;
   if (!info[0]) return fail("Unknown space", 404);
 
@@ -52,10 +54,13 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     return json({
       error: "Confirmation required. This permanently erases the space, every message and both people's access. It cannot be undone.",
       requiredConfirm: phrase,
-      willDelete: { label: info[0].label, people: info[0].people, messages: info[0].messages },
+      willDelete: { label: info[0].label, people: info[0].people, messages: info[0].messages, files: info[0].files },
     }, 409);
   }
 
+  // Files live outside the database, so remove them from storage first.
+  const files = await sql`select pathname from media where space_id = ${id}`;
+  await deleteBlobs(files.map((f) => f.pathname as string));
   await sql`delete from spaces where id = ${id}`;
   return json({ ok: true, deleted: info[0].label });
 }

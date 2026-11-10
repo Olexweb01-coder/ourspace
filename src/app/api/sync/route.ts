@@ -19,19 +19,30 @@ export async function GET(req: Request) {
     sql`select now() as now`,
     since
       // 3s overlap so commits that raced the last cursor are never missed; client de-dupes by id.
-      ? sql`select id::text as id, sender_id, kind, view_once, viewed_at, deleted, reactions, expires_at, created_at,
-                   case when deleted then null else iv end as iv,
-                   case when deleted then null else ciphertext end as ciphertext
-            from messages where space_id = ${me.spaceId} and updated_at > ${since.toISOString()}::timestamptz - interval '3 seconds'
-            order by updated_at asc limit 500`
-      : sql`select * from (select id::text as id, sender_id, kind, view_once, viewed_at, deleted, reactions, expires_at, created_at,
-                   case when deleted then null else iv end as iv,
-                   case when deleted then null else ciphertext end as ciphertext
-            from messages where space_id = ${me.spaceId} order by messages.id desc limit 150) t
+      ? sql`select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
+              msg.reactions, msg.expires_at, msg.created_at, msg.media_id,
+              case when msg.deleted then null else msg.iv end as iv,
+              case when msg.deleted then null else msg.ciphertext end as ciphertext,
+              md.kept_by as media_kept_by, md.expires_at as media_expires_at,
+              (msg.media_id is not null and (md.id is null or (md.expires_at is not null and md.expires_at < now()))) as media_gone
+            from messages msg left join media md on md.id = msg.media_id
+            where msg.space_id = ${me.spaceId}
+              and msg.updated_at > ${since.toISOString()}::timestamptz - interval '3 seconds'
+            order by msg.updated_at asc limit 500`
+      : sql`select * from (
+              select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
+                msg.reactions, msg.expires_at, msg.created_at, msg.media_id,
+                case when msg.deleted then null else msg.iv end as iv,
+                case when msg.deleted then null else msg.ciphertext end as ciphertext,
+                md.kept_by as media_kept_by, md.expires_at as media_expires_at,
+                (msg.media_id is not null and (md.id is null or (md.expires_at is not null and md.expires_at < now()))) as media_gone
+              from messages msg left join media md on md.id = msg.media_id
+              where msg.space_id = ${me.spaceId}
+              order by msg.id desc limit 150) t
             order by id::bigint asc`,
-    sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at
+    sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at, avatar_media_id
         from members where space_id = ${me.spaceId}`,
-    sql`select label, disappear_seconds from spaces where id = ${me.spaceId}`,
+    sql`select label, disappear_seconds, theme, background_media_id from spaces where id = ${me.spaceId}`,
   ]);
 
   const [, , nowRows, messages, members, spaces] = results;
@@ -46,8 +57,14 @@ export async function GET(req: Request) {
       notifications: m.notifications,
       lastSeenAt: m.last_seen_at,
       lastNudgeAt: m.last_nudge_at,
+      avatarMediaId: m.avatar_media_id,
     })),
-    space: { label: spaces[0]?.label, disappearSeconds: spaces[0]?.disappear_seconds ?? null },
+    space: {
+      label: spaces[0]?.label,
+      disappearSeconds: spaces[0]?.disappear_seconds ?? null,
+      theme: spaces[0]?.theme ?? "candle",
+      backgroundMediaId: spaces[0]?.background_media_id ?? null,
+    },
     messages: messages.map((r) => ({
       id: r.id,
       senderId: r.sender_id,
@@ -60,6 +77,9 @@ export async function GET(req: Request) {
       createdAt: r.created_at,
       iv: r.iv,
       ct: r.ciphertext,
+      media: r.media_id
+        ? { id: r.media_id, keptBy: r.media_kept_by, expiresAt: r.media_expires_at, gone: r.media_gone }
+        : null,
     })),
   });
 }

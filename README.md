@@ -26,6 +26,18 @@ End-to-end encrypted PWA. Next.js 15 on Vercel, Neon Postgres. Built by olexweb.
 
 Do the same yourself: after setup, add the app to your Home Screen from the chat screen.
 
+## Photos, voice notes, videos and files (Phase 2)
+- Files are encrypted on the phone before upload and stored in a **private** Vercel Blob store (`ourspace-media`).
+  The server only ever holds scrambled bytes and streams them back to an unlocked member.
+- Photos are shrunk to about 300 KB, voice notes are about 0.5 MB a minute, and videos and files can be up to 50 MB.
+- Everything disappears after **30 days** unless either of you taps **Keep**. View-once files are deleted as soon as they're opened.
+- **Save to phone** puts the unlocked file in your gallery or files.
+- A daily clean-up job removes expired files from storage. The storage meter is in settings.
+- Free Hobby limits are shared by all your spaces: 1 GB stored and about 2,000 uploads a month.
+
+Setup: run `db/002_media.sql` once in Neon. For local testing, copy `BLOB_READ_WRITE_TOKEN` from
+Vercel → Settings → Environment Variables into `.env.local`.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

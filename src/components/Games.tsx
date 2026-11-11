@@ -31,6 +31,18 @@ type Game = Omit<Row, "iv" | "ct" | "mine" | "theirs"> & { questions: string[]; 
 type View = { screen: "home" } | { screen: "play"; id: string } | { screen: "results"; id: string } | { screen: "deck"; deck: DeckKind };
 
 const setupAad = (spaceId: string, id: string) => `game:${spaceId}:${id}`;
+
+// Every question either of you has played, remembered on this phone so nothing repeats.
+const playedKey = (spaceId: string) => `ourspace:played:${spaceId}`;
+function readPlayed(spaceId: string): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(playedKey(spaceId)) || "[]") as string[]); } catch { return new Set(); }
+}
+function savePlayed(spaceId: string, ids: Iterable<string>) {
+  try {
+    const all = Array.from(new Set([...readPlayed(spaceId), ...ids]));
+    localStorage.setItem(playedKey(spaceId), JSON.stringify(all.slice(-5000)));
+  } catch { /* private mode: games still work, just with less memory */ }
+}
 const answerAad = (spaceId: string, id: string, memberId: string) => `answer:${spaceId}:${id}:${memberId}`;
 
 export default function Games({ vault, me, partner, onClose, onToast, onSendText, onChanged }: Props) {
@@ -50,6 +62,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
           out.push({ id: r.id, kind: r.kind, createdBy: r.createdBy, subject: r.subject, createdAt: r.createdAt, finishedAt: r.finishedAt, partnerAnswered: r.partnerAnswered, questions: setup.questions, mine, theirs });
         } catch { /* skip anything that won't unlock */ }
       }
+      savePlayed(vault.spaceId, out.flatMap((g) => g.questions));
       setGames(out);
     } catch (err) {
       onToast(err instanceof ApiError ? err.message : "Couldn't open games. Check your connection.");
@@ -62,9 +75,11 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
     if (!partner) return onToast("Games need two players. Invite your partner first.");
     setBusy(true);
     try {
-      const recent = new Set((games ?? []).filter((g) => g.kind === kind).slice(0, 6).flatMap((g) => g.questions));
+      const played = new Set([...readPlayed(vault.spaceId), ...(games ?? []).flatMap((g) => g.questions)]);
+      const questions = pickQuestions(kind, played);
+      savePlayed(vault.spaceId, questions);
       const id = crypto.randomUUID();
-      const { iv, ct } = await encryptJSON(vault.encKey, { questions: pickQuestions(kind, recent) }, setupAad(vault.spaceId, id));
+      const { iv, ct } = await encryptJSON(vault.encKey, { questions }, setupAad(vault.spaceId, id));
       await api("/api/games", { body: { action: "start", id, kind, iv, ct } });
       await load();
       onChanged();
@@ -123,7 +138,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
           : view.screen === "home" ? <Home games={games} me={me} partner={partner} busy={busy} start={start} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
           : view.screen === "play" && find(view.id) ? <Play key={view.id} game={find(view.id)!} me={me} partner={partner} busy={busy} submit={submit} nameOf={nameOf} />
           : view.screen === "results" && find(view.id) ? <Results game={find(view.id)!} me={me} partner={partner} nameOf={nameOf} remove={remove} />
-          : view.screen === "deck" ? <Deck deck={view.deck} partner={partner} onSendText={onSendText} onToast={onToast} />
+          : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onToast={onToast} />
           : <p className="hint">That game is gone.</p>}
       </div>
     </div>
@@ -291,14 +306,28 @@ function Results({ game, me, partner, nameOf, remove }: {
   );
 }
 
-function Deck({ deck, partner, onSendText, onToast }: {
-  deck: DeckKind; partner: Person | null; onSendText: (t: string) => Promise<boolean>; onToast: (m: string) => void;
+function Deck({ deck, spaceId, partner, onSendText, onToast }: {
+  deck: DeckKind; spaceId: string; partner: Person | null; onSendText: (t: string) => Promise<boolean>; onToast: (m: string) => void;
 }) {
   const d = DECKS[deck];
-  const [seen, setSeen] = useState<Set<number>>(() => new Set());
-  const [card, setCard] = useState<number>(() => drawCard(deck, new Set()));
+  const key = `ourspace:cards:${spaceId}:${deck}`;
+  // Cards you've drawn are remembered, so the deck only starts over once you've seen every card.
+  const [seen, setSeen] = useState<Set<number>>(() => {
+    try {
+      const s = new Set<number>(JSON.parse(localStorage.getItem(key) || "[]") as number[]);
+      return s.size >= d.cards.length ? new Set() : s;
+    } catch { return new Set(); }
+  });
+  const [card, setCard] = useState<number>(() => drawCard(deck, seen));
   const [sending, setSending] = useState(false);
-  useEffect(() => { setSeen((s) => new Set(s).add(card)); }, [card]);
+  useEffect(() => {
+    setSeen((prev) => {
+      const next = new Set(prev).add(card);
+      const toSave = next.size >= d.cards.length ? new Set<number>([card]) : next;
+      try { localStorage.setItem(key, JSON.stringify(Array.from(toSave))); } catch { /* ignore */ }
+      return toSave;
+    });
+  }, [card, key, d.cards.length]);
 
   async function send() {
     if (!partner) return onToast("Invite your partner first.");

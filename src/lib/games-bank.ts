@@ -223,22 +223,144 @@ export const GAME_INFO: Record<GameKind, { title: string; lead: string; rounds: 
 };
 
 const ALL = new Map<string, Question>([...WOULD_YOU_RATHER, ...THIS_OR_THAT, ...KNOW_ME].map((q) => [q.id, q]));
-export const questionById = (id: string) => ALL.get(id) ?? null;
 
-/** Picks questions, preferring ones you haven't played recently. */
-export function pickQuestions(kind: GameKind, recentlyUsed: Set<string>): string[] {
+// ---------------- Generated questions ----------------
+// Hand-picked lists the app combines into fresh questions on the phone. IDs describe the combination,
+// so any phone can rebuild the exact same question later. Add items to the END of a list only.
+
+const LISTS = {
+  food: ["Jollof rice", "Fried rice", "Pounded yam", "Amala", "Suya", "Shawarma", "Pizza", "Burgers", "Pasta", "Noodles",
+    "Moi moi", "Akara", "Plantain", "Pepper soup", "Egusi", "Ofada rice", "Small chops", "Grilled fish", "Chicken wings", "Tacos"],
+  treats: ["Ice cream", "Cake", "Chocolate", "Puff-puff", "Chin chin", "Doughnuts", "Cookies", "Popcorn", "Meat pie",
+    "Fruit salad", "Pancakes", "Waffles"],
+  drinks: ["Zobo", "Chapman", "Tea", "Coffee", "Hot chocolate", "Smoothies", "Coconut water", "Lemonade", "Malt", "Milkshakes"],
+  dates: ["A movie night", "A picnic", "A rooftop dinner", "Karaoke", "A beach day", "A cooking class", "Bowling",
+    "An art gallery", "A spa day", "A long drive", "Stargazing", "A concert", "A comedy show", "Board games", "A boat ride", "Paint and sip"],
+  places: ["Paris", "Zanzibar", "Cape Town", "Dubai", "Accra", "Bali", "London", "New York", "Marrakech", "Tokyo",
+    "Santorini", "Nairobi", "Rio", "Mauritius"],
+  music: ["Afrobeats", "Amapiano", "Gospel", "R&B", "Highlife", "Jazz", "Hip-hop", "Fuji", "Reggae", "Pop",
+    "Old-school love songs", "Afro-soul"],
+  everyday: ["Early nights", "Late nights", "Cooking", "Cleaning", "Laundry", "Grocery shopping", "The gym", "Long walks",
+    "Reading", "Gaming", "Naps", "Journaling"],
+  gifts: ["Flowers", "Perfume", "A watch", "Jewellery", "A handwritten letter", "Shoes", "A surprise trip", "A photo album",
+    "Concert tickets", "A spa voucher", "Clothes", "A new gadget"],
+  moments: ["Sunrise", "Sunset", "Rainy days", "Sunny days", "Harmattan mornings", "Starry nights", "Breezy evenings", "Misty mornings"],
+  films: ["Romance", "Comedy", "Action", "Horror", "Thrillers", "Animation", "Nollywood classics", "Documentaries", "K-dramas", "Musicals"],
+  chores: ["Cooking", "Cleaning the bathroom", "Laundry", "Washing dishes", "Grocery shopping", "Ironing", "Taking out the trash", "Making the bed"],
+} as const;
+type ListKey = keyof typeof LISTS;
+const TOT_LISTS: ListKey[] = ["food", "treats", "drinks", "dates", "places", "music", "everyday", "gifts", "moments", "films"];
+
+const WYR_FRAMES = ["Spend a whole weekend", "Spend every Sunday for a month", "Spend our next anniversary", "Spend a rainy day"];
+const WYR_ACTIVITIES = ["cooking together", "dancing in the living room", "exploring a new city", "at the beach",
+  "binge-watching a series", "on a road trip", "at a spa", "trying new restaurants", "in bed with snacks and films",
+  "hiking somewhere green", "at a music festival", "learning something new together", "with our friends",
+  "with no phones at all", "taking photos everywhere", "playing games", "at a fancy hotel", "visiting family",
+  "planning our future", "reading side by side", "stargazing", "on a boat", "at a karaoke bar", "building something together"];
+
+const KNOW_PROMPTS: Partial<Record<ListKey, string>> = {
+  food: "The meal I'd pick tonight", treats: "My favourite treat", drinks: "My go-to drink right now",
+  dates: "The date I'd love most", places: "Where I'd fly tomorrow if I could", music: "What I could listen to all day",
+  gifts: "The gift that would make me smile most", moments: "My favourite kind of moment", films: "The film I'd choose for a night in",
+  chores: "The chore I'd happily never do again",
+};
+const KNOW_LISTS = Object.keys(KNOW_PROMPTS) as ListKey[];
+
+function generated(id: string): Question | null {
+  const parts = id.split(":");
+  const n = (v: string) => (/^\d+$/.test(v) ? Number(v) : -1);
+  if (parts[0] === "tg" && parts.length === 4) {
+    const list = LISTS[parts[1] as ListKey];
+    const a = n(parts[2]), b = n(parts[3]);
+    if (!list || a < 0 || b < 0 || a === b || a >= list.length || b >= list.length) return null;
+    return { id, q: "This or that", options: [list[a], list[b]] };
+  }
+  if (parts[0] === "wg" && parts.length === 4) {
+    const f = n(parts[1]), a = n(parts[2]), b = n(parts[3]);
+    if (f < 0 || f >= WYR_FRAMES.length || a < 0 || b < 0 || a === b || a >= WYR_ACTIVITIES.length || b >= WYR_ACTIVITIES.length) return null;
+    return { id, q: "Would you rather", options: [`${WYR_FRAMES[f]} ${WYR_ACTIVITIES[a]}`, `${WYR_FRAMES[f]} ${WYR_ACTIVITIES[b]}`] };
+  }
+  if (parts[0] === "kg" && parts.length === 3) {
+    const key = parts[1] as ListKey;
+    const list = LISTS[key];
+    const prompt = KNOW_PROMPTS[key];
+    const idx = parts[2].split(".").map(n);
+    if (!list || !prompt || idx.length !== 4 || new Set(idx).size !== 4 || idx.some((i) => i < 0 || i >= list.length)) return null;
+    return { id, q: prompt, options: idx.map((i) => list[i]) };
+  }
+  return null;
+}
+
+export const questionById = (id: string) => ALL.get(id) ?? generated(id);
+
+const rand = (max: number) => crypto.getRandomValues(new Uint32Array(1))[0] % max;
+const shuffle = <T,>(a: T[]) => {
+  const c = [...a];
+  for (let i = c.length - 1; i > 0; i--) { const j = rand(i + 1); [c[i], c[j]] = [c[j], c[i]]; }
+  return c;
+};
+
+function randomGenerated(kind: GameKind): string {
+  if (kind === "tot") {
+    const key = TOT_LISTS[rand(TOT_LISTS.length)];
+    const len = LISTS[key].length;
+    const a = rand(len); let b = rand(len - 1); if (b >= a) b++;
+    return `tg:${key}:${a}:${b}`;
+  }
+  if (kind === "wyr") {
+    const len = WYR_ACTIVITIES.length;
+    const a = rand(len); let b = rand(len - 1); if (b >= a) b++;
+    return `wg:${rand(WYR_FRAMES.length)}:${a}:${b}`;
+  }
+  const key = KNOW_LISTS[rand(KNOW_LISTS.length)];
+  const picks = shuffle(Array.from({ length: LISTS[key].length }, (_, i) => i)).slice(0, 4);
+  return `kg:${key}:${picks.join(".")}`;
+}
+
+/** Same pair in either order, or the same quiz prompt, counts as already played. */
+function familyOf(id: string): string {
+  const p = id.split(":");
+  if (p[0] === "tg") return `tg:${p[1]}:${[p[2], p[3]].sort().join(":")}`;
+  if (p[0] === "wg") return `wg:${p[1]}:${[p[2], p[3]].sort().join(":")}`;
+  if (p[0] === "kg") return `kg:${p[1]}`;
+  return id;
+}
+
+/** How many different questions exist for each game, for the "never repeat" promise. */
+export function poolSize(kind: GameKind): number {
+  const pairs = (n: number) => (n * (n - 1)) / 2;
+  if (kind === "tot") return THIS_OR_THAT.length + TOT_LISTS.reduce((s, k) => s + pairs(LISTS[k].length), 0);
+  if (kind === "wyr") return WOULD_YOU_RATHER.length + WYR_FRAMES.length * pairs(WYR_ACTIVITIES.length);
+  return KNOW_ME.length + KNOW_LISTS.length;
+}
+
+/**
+ * About 60% hand-written and 40% generated, never anything either of you has played before
+ * (until literally everything has been played, then the oldest come back).
+ */
+export function pickQuestions(kind: GameKind, played: Set<string>): string[] {
   const { bank, rounds } = GAME_INFO[kind];
-  const shuffle = <T,>(a: T[]) => {
-    const c = [...a];
-    for (let i = c.length - 1; i > 0; i--) {
-      const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
-      [c[i], c[j]] = [c[j], c[i]];
-    }
-    return c;
+  const playedFamilies = new Set(Array.from(played, familyOf));
+  const handFresh = shuffle(bank.filter((q) => !played.has(q.id)));
+  const chosen: string[] = [];
+  const families = new Set<string>();
+  const add = (id: string) => {
+    const f = familyOf(id);
+    if (families.has(f)) return false;
+    families.add(f); chosen.push(id); return true;
   };
-  const fresh = shuffle(bank.filter((q) => !recentlyUsed.has(q.id)));
-  const used = shuffle(bank.filter((q) => recentlyUsed.has(q.id)));
-  return [...fresh, ...used].slice(0, rounds).map((q) => q.id);
+
+  for (const q of handFresh.slice(0, Math.ceil(rounds * 0.6))) add(q.id);
+  for (let tries = 0; chosen.length < rounds && tries < 400; tries++) {
+    const id = randomGenerated(kind);
+    if (playedFamilies.has(familyOf(id))) continue;
+    add(id);
+  }
+  for (const q of handFresh) { if (chosen.length >= rounds) break; add(q.id); }
+  // Everything has been played: let the oldest ones return.
+  for (const q of shuffle(bank)) { if (chosen.length >= rounds) break; add(q.id); }
+  for (let tries = 0; chosen.length < rounds && tries < 400; tries++) add(randomGenerated(kind));
+  return shuffle(chosen).slice(0, rounds);
 }
 
 export function drawCard(deck: DeckKind, avoid: Set<number>): number {

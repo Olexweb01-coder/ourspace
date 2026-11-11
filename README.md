@@ -73,7 +73,11 @@ Open the dice button in the chat header.
   you see each other's picks and a score. Answers are encrypted and final, and the server won't send your
   partner's answers until you've submitted yours, so nobody can peek.
 - **Cards:** Truth, Dare and Deep talk. Draw one and send it into the chat.
-- 205 original questions and cards live in `src/lib/games-bank.ts`. Add your own any time.
+- 205 hand-written questions and cards, plus generated ones built on the phone from hand-picked lists
+  (foods, date ideas, places, music, gifts, films): 823 possible This or that, 1,144 Would you rather.
+- Nothing repeats: each phone remembers every question either of you has played, and every card drawn.
+  A deck only starts over after every card has been seen.
+- All of it lives in `src/lib/games-bank.ts`. Add items to the END of any list to grow it.
 
 Setup: run `db/005_games.sql` once in Neon.
 

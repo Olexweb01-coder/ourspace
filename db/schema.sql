@@ -369,3 +369,27 @@ create table if not exists hidden_messages (                          -- "delete
   created_at  timestamptz not null default now(),
   primary key (member_id, message_id)
 );
+
+-- ===== Calls (same as db/015_calls.sql) =====
+  id           uuid primary key,
+  space_id     uuid not null references spaces(id) on delete cascade,
+  caller_id    uuid not null references members(id) on delete cascade,
+  callee_id    uuid not null references members(id) on delete cascade,
+  kind         text not null check (kind in ('voice','video')),
+  status       text not null default 'ringing' check (status in ('ringing','active','ended','missed','declined','busy')),
+  created_at   timestamptz not null default now(),
+  answered_at  timestamptz,
+  ended_at     timestamptz
+);
+create index if not exists calls_space_idx on calls(space_id, created_at desc);
+
+create table if not exists call_signals (
+  id          bigint generated always as identity primary key,
+  call_id     uuid not null references calls(id) on delete cascade,
+  from_member uuid not null references members(id) on delete cascade,
+  type        text not null check (type in ('offer','answer','restart','restart-answer')),
+  iv          text not null,
+  ciphertext  text not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists call_signals_call_idx on call_signals(call_id, id);

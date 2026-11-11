@@ -1233,3 +1233,64 @@ button.notice { cursor: pointer; }
 .sendprev__once { width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; border: 2px solid rgba(248, 227, 232, 0.6); background: none; color: #f8e3e8; font-weight: 800; }
 .sendprev__once--on { background: var(--candle); border-color: var(--candle); color: #2a0d1b; }
 .sendprev__hint { margin: 0; text-align: center; font-size: 0.82rem; color: var(--candle); }
+
+/* ---------- calls ---------- */
+.call { position: fixed; inset: 0; z-index: 50; background: radial-gradient(120% 70% at 50% 25%, #3b1729, #120910 70%); color: #f8e3e8;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; overflow: hidden; touch-action: none;
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+.call--video { background: #0c0509; }
+.call__remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #0c0509; }
+.call__remote--small { inset: auto; right: 16px; top: calc(env(safe-area-inset-top) + 16px); width: 110px; height: 156px; border-radius: 16px; z-index: 3; }
+.call__hidden { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.call__who { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.call__avatar { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 4px rgba(246, 201, 127, 0.35); }
+.call__avatar--letter { display: grid; place-items: center; background: linear-gradient(135deg, var(--candle), var(--rose)); color: #2a0d1b; font-family: var(--font-display), Georgia, serif; font-size: 3rem; }
+.call__name { margin: 0; font-family: var(--font-display), Georgia, serif; font-style: italic; font-size: 1.9rem; }
+.call__status { position: relative; z-index: 2; margin: 0; font-variant-numeric: tabular-nums; color: rgba(248, 227, 232, 0.85); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); text-align: center; }
+.call--video .call__who, .call--video .call__status { position: absolute; top: calc(env(safe-area-inset-top) + 24px); }
+.call--video .call__status { top: calc(env(safe-area-inset-top) + 14px); }
+.call__weak { position: relative; z-index: 2; margin: 0; font-size: 0.82rem; color: var(--candle); background: rgba(0, 0, 0, 0.35); padding: 4px 12px; border-radius: 999px; }
+.call__pip { position: absolute; z-index: 4; width: 112px; height: 160px; border-radius: 16px; overflow: hidden; background: #2c1823;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); touch-action: none; cursor: grab; transition: left 0.25s, top 0.25s, right 0.25s, bottom 0.25s; }
+.call__pip--drag { transition: none; cursor: grabbing; }
+.call__pip video { width: 100%; height: 100%; object-fit: cover; }
+.call__mirror { transform: scaleX(-1); }
+.call__pip--tl { left: 16px; top: calc(env(safe-area-inset-top) + 16px); }
+.call__pip--tr { right: 16px; top: calc(env(safe-area-inset-top) + 16px); }
+.call__pip--bl { left: 16px; bottom: calc(env(safe-area-inset-bottom) + 110px); }
+.call__pip--br { right: 16px; bottom: calc(env(safe-area-inset-bottom) + 110px); }
+.call__pip--big { inset: 0 !important; width: 100%; height: 100%; border-radius: 0; z-index: 1; }
+.call__bar { position: absolute; z-index: 5; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 24px); display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.call__bar--answer { gap: 40px; }
+.cbtn { width: 58px; height: 58px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgba(255, 255, 255, 0.14); }
+.cbtn svg { width: 26px; height: 26px; fill: #f8e3e8; }
+.cbtn--on { background: #f8e3e8; }
+.cbtn--on svg { fill: #2a0d1b; }
+.cbtn--end { background: #d64560; }
+.cbtn--end svg { fill: #fff; }
+.cbtn--answer { background: #3fa67a; animation: cring 1.4s ease-in-out infinite; }
+.cbtn--answer svg { fill: #fff; }
+@keyframes cring { 50% { box-shadow: 0 0 0 14px rgba(63, 166, 122, 0); } 0% { box-shadow: 0 0 0 0 rgba(63, 166, 122, 0.6); } }
+@media (prefers-reduced-motion: reduce) { .cbtn--answer { animation: none; } .call__pip { transition: none; } }
+.chead__call svg { fill: var(--candle); }
+@media (max-width: 380px) { .chead .icon-btn { width: 34px; height: 34px; } .chead { gap: 2px; } .streak-pill { padding: 4px 7px; } }
+.callrow { display: flex; margin: 6px 0; }
+.callrow--mine { justify-content: flex-end; }
+.callrow__b { display: inline-flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 16px; border: 0; background: rgba(255, 255, 255, 0.07); color: var(--blush); text-align: left; font: inherit; }
+.callrow--mine .callrow__b { background: rgba(194, 65, 107, 0.28); }
+.callrow__b svg { width: 18px; height: 18px; fill: var(--candle); flex-shrink: 0; }
+.callrow__b--missed svg { fill: var(--danger); }
+.callrow__b span { display: flex; flex-direction: column; }
+.callrow__b strong { font-weight: 600; font-size: 0.92rem; }
+.callrow__b small { color: var(--muted); font-size: 0.75rem; }
+/* Phones: the header holds name, streak, two call buttons and the nudge; keep the name readable. */
+@media (max-width: 440px) {
+  .chead { gap: 0; padding-left: 6px; padding-right: 6px; }
+  .chead .icon-btn { width: 34px; height: 34px; }
+  .chead .icon-btn svg { width: 20px; height: 20px; }
+  .chead__who { gap: 6px; }
+  .chead .sring { transform: scale(0.86); transform-origin: left center; margin-right: -6px; }
+  .streak-pill { padding: 3px 7px; font-size: 0.8rem; gap: 3px; }
+  .streak-pill svg { width: 12px; height: 12px; }
+  .chead__name { font-size: 1.2rem; }
+}

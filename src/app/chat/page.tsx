@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import AboutYou from "@/components/AboutYou";
+import CallScreen from "@/components/call/CallScreen";
 import { NotifPrompt, NotifySettings } from "@/components/Notifications";
 import SpaceSwitcher from "@/components/SpaceSwitcher";
 import BondMark from "@/components/BondMark";
@@ -67,8 +68,10 @@ type Special = Omit<SpecialRow, "iv" | "ct"> & { title: string };
 type CycleRow = { memberId: string; iv: string; ct: string };
 type WaitingGame = { id: string; kind: "wyr" | "tot" | "know"; createdBy: string };
 type StatusRow = { id: string; memberId: string; mediaId: string | null; iv: string; ct: string; createdAt: string; expiresAt: string; seenAt: string | null };
+type CallRow = { id: string; callerId: string; calleeId: string; kind: "voice" | "video"; status: string; createdAt: string; answeredAt: string | null; endedAt: string | null };
 type SyncResponse = {
   now: string;
+  calls?: CallRow[];
   gamesWaiting: WaitingGame[];
   statuses: StatusRow[];
   live: { id: string; kind: "ludo" | "whot"; status: "lobby" | "playing"; createdBy: string; partnerHere: boolean } | null;
@@ -81,7 +84,7 @@ type SyncResponse = {
   space: Space;
   messages: Msg[];
 };
-type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "cycles" | "statuses">;
+type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "cycles" | "statuses" | "calls">;
 type TextPayload = { t: "text"; body: string };
 type Payload = (TextPayload | MediaPayload) & { reply?: ReplyRef };
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
@@ -180,6 +183,9 @@ export default function ChatPage() {
   };
   const [aboutOpen, setAboutOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
+  const [calls, setCalls] = useState<CallRow[]>([]);
+  const [activeCall, setActiveCall] = useState<{ id: string; role: "caller" | "callee"; kind: "voice" | "video" } | null>(null);
+  const handledCalls = useRef(new Set<string>());
   const [notifPrompt, setNotifPrompt] = useState(false);
   const notifAsked = useRef(false);
   const [canSwitch, setCanSwitch] = useState(false);
@@ -334,6 +340,13 @@ export default function ChatPage() {
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
       setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [], live: data.live ?? null });
+      if (data.calls) {
+        setCalls((prev) => (JSON.stringify(prev) === JSON.stringify(data.calls) ? prev : data.calls!));
+        // Someone is calling you: ring (each call only once on this phone).
+        const ringing = data.calls.find((c) => c.status === "ringing" && c.calleeId === data.me.id && !handledCalls.current.has(c.id)
+          && Date.now() - new Date(c.createdAt).getTime() < 45_000);
+        if (ringing) { handledCalls.current.add(ringing.id); setActiveCall((cur) => cur ?? { id: ringing.id, role: "callee", kind: ringing.kind }); }
+      }
       void decryptMoods(data.moods ?? []);
       void decryptPlans(data.specialDays ?? [], data.cycles ?? []);
       void decryptStatuses(data.statuses ?? []);
@@ -483,6 +496,7 @@ export default function ChatPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const callsShown = useMemo(() => calls.filter((c) => c.status !== "ringing" && c.status !== "active"), [calls]);
   const visible = useMemo(() => {
     const now = Date.now();
     return Array.from(msgs.values())
@@ -1004,6 +1018,19 @@ export default function ChatPage() {
     }
   }
 
+  // ---------- calls ----------
+  async function startCall(kind: "voice" | "video") {
+    if (activeCall || !partner) return;
+    try {
+      const { id } = await api<{ id: string }>("/api/call", { body: { kind } });
+      handledCalls.current.add(id);
+      setActiveCall({ id, role: "caller", kind });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return lockOut();
+      setToast(err instanceof ApiError ? err.message : "Couldn't start the call. Check your connection.");
+    }
+  }
+
   function startReply(m: Msg) {
     if (editing) cancelEdit();
     setReply({ id: m.id, from: m.senderId, preview: previewOf(m) });
@@ -1219,6 +1246,7 @@ export default function ChatPage() {
             onStreak={() => openOnly("streak")}
             onNudge={partner ? nudge : null}
             nudgeLabel={`Nudge ${partnerName}`}
+            onCall={partner ? (k) => void startCall(k) : null}
           />
           {notices.length > 0 && (
             <div className="notices" role="list">
@@ -1257,7 +1285,36 @@ export default function ChatPage() {
             </div>
           )}
 
-          {visible.map((m) => {
+          {[...visible.map((m) => ({ at: m.createdAt, m, c: null as CallRow | null })), ...callsShown.map((c) => ({ at: c.createdAt, m: null as Msg | null, c }))]
+            .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+            .map(({ m: maybe, c }) => {
+            if (c) {
+              const day = dayLabel(c.createdAt);
+              const showDay = day !== lastDay;
+              lastDay = day; lastSender = ""; lastTime = 0;
+              const mineCall = c.callerId === me.id;
+              const missed = c.status === "missed" || c.status === "declined" || c.status === "busy";
+              const mins = c.answeredAt && c.endedAt ? Math.max(1, Math.round((new Date(c.endedAt).getTime() - new Date(c.answeredAt).getTime()) / 60000)) : 0;
+              const what = c.kind === "video" ? "Video call" : "Voice call";
+              const text = missed
+                ? (mineCall ? `${what} · ${c.status === "declined" ? "declined" : "no answer"}` : `Missed ${c.kind} call`)
+                : `${what}${mins ? ` · ${mins} min` : ""}`;
+              return (
+                <div key={`call-${c.id}`}>
+                  {showDay && <p className="daypill glass">{day}</p>}
+                  <div className={mineCall ? "callrow callrow--mine" : "callrow"}>
+                    <button type="button" className={missed && !mineCall ? "callrow__b callrow__b--missed" : "callrow__b"} onClick={() => void startCall(c.kind)}
+                      aria-label={`${text}. Call back`}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true">{c.kind === "video"
+                        ? <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11z" />
+                        : <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z" />}</svg>
+                      <span><strong>{text}</strong><small>{timeOf(c.createdAt)}{missed && !mineCall ? " · Tap to call back" : ""}</small></span>
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            const m = maybe!;
             const mine = m.senderId === me.id;
             const day = dayLabel(m.createdAt);
             const showDay = day !== lastDay;
@@ -1609,6 +1666,11 @@ export default function ChatPage() {
             )}
           </div>
         </div>
+      )}
+      {activeCall && (
+        <CallScreen vault={vault} callId={activeCall.id} role={activeCall.role} kind={activeCall.kind} partnerName={partnerName}
+          partnerAvatar={partner ? avatars[partner.id] ?? null : null}
+          onClose={({ reason }) => { setActiveCall(null); if (reason === "no-media") setToast("Allow the microphone for Our Space in your browser settings, then call again."); void syncNow(); }} />
       )}
       {switchOpen && <SpaceSwitcher currentSpaceId={me.spaceId} isHost={me.role === "host"} onClose={() => setSwitchOpen(false)} />}
       {aboutOpen && (

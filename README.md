@@ -153,6 +153,14 @@ Setup: run `db/012_edit_messages.sql` and `db/013_notification_choices.sql` once
 - **Which space opens:** the most recently used one (a switch sticks); a notification opens its own space.
 Setup: run `db/014_delete_messages.sql` once in Neon.
 
+## Voice and video calls
+In-app calls with WebRTC: direct between the phones when possible (free STUN), through the ExpressTURN relay otherwise.
+The setup (offer/answer) travels through our own server encrypted with the space key; the call is encrypted end to end.
+Weak networks: one setup bundle each way, voice at high priority, video lowered automatically, ICE restart on drops.
+A video channel always exists, so camera on/off and screen sharing (computers only) need no renegotiation.
+Calls ring in the app (and by notification when it's closed), go missed after 45 s, and show in the chat history.
+Setup: run `db/015_calls.sql` once in Neon, and set `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD` in Vercel.
+
 ## Layers and computer layout
 On a computer (960px and wider) the side panel stays open, so pages and sheets open in the chat area beside it and
 only one page is open at a time. Full-screen moments (celebrations, photo viewer, view once, statuses, live games)

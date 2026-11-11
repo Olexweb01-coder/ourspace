@@ -69,6 +69,7 @@ async function wants(memberId: string, tag: string | undefined): Promise<{ space
   const m = rows[0];
   if (!m) return null;
   const yes = { spaceId: m.space_id as string };
+  if (tag === "call" && m.in_app) return null;   // looking at the app: the ringing screen is already up
   if (tag && ALWAYS_TAGS.includes(tag)) return yes;
   if (m.in_app && tag && IN_APP_QUIET_TAGS.includes(tag)) return null;   // already looking at the app
   const cat = categoryOf(tag);

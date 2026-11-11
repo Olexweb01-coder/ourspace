@@ -1,3 +1,6 @@
+import { settleCalls } from "@/lib/calls";
+import { after } from "next/server";
+import { pushTo } from "@/lib/push";
 import { db } from "@/lib/db";
 import { fail, json } from "@/lib/server-utils";
 import { computeStreak } from "@/lib/rituals";
@@ -13,6 +16,9 @@ export async function GET(req: Request) {
   if (since && Number.isNaN(since.getTime())) return fail("Bad cursor");
 
   const sql = db();
+  for (const m of await settleCalls(me.spaceId)) {
+    after(() => pushTo(m.callee_id, { title: "Missed call", body: `You missed a ${m.kind} call.`, tag: "call" }));
+  }
   const results = await sql.transaction([
     sql`update messages set deleted = true, iv = '', ciphertext = '', reactions = '{}'::jsonb, updated_at = now()
         where space_id = ${me.spaceId} and deleted = false and expires_at is not null and expires_at < now()`,
@@ -73,9 +79,11 @@ export async function GET(req: Request) {
         from live_games g
         where g.space_id = ${me.spaceId} and g.status in ('lobby','playing') and g.updated_at > now() - interval '30 minutes'
         order by g.updated_at desc limit 1`,
+    sql`select id, caller_id, callee_id, kind, status, created_at, answered_at, ended_at from calls
+        where space_id = ${me.spaceId} and created_at > now() - interval '30 days' order by created_at desc limit 40`,
   ]);
 
-  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows] = results;
+  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows, callRows] = results;
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
   const st = computeStreak(completeDays, today);
@@ -114,6 +122,8 @@ export async function GET(req: Request) {
       id: st.id, memberId: st.member_id, mediaId: st.media_id, iv: st.iv, ct: st.ciphertext,
       createdAt: st.created_at, expiresAt: st.expires_at, seenAt: st.seen_at,
     })),
+    calls: callRows.map((c) => ({ id: c.id, callerId: c.caller_id, calleeId: c.callee_id, kind: c.kind, status: c.status,
+      createdAt: c.created_at, answeredAt: c.answered_at, endedAt: c.ended_at })),
     live: liveRows[0] ? { id: liveRows[0].id, kind: liveRows[0].kind, status: liveRows[0].status, createdBy: liveRows[0].created_by, partnerHere: liveRows[0].partner_here } : null,
     gamesWaiting: gamesWaiting.map((g) => ({ id: g.id, kind: g.kind, createdBy: g.created_by })),
     cycles: cycles.map((c) => ({ memberId: c.member_id, iv: c.iv, ct: c.ciphertext })),

@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import BondMark from "@/components/BondMark";
-import Celebration from "@/components/Celebration";
+import Celebration, { streakLine } from "@/components/Celebration";
 import InviteBox from "@/components/InviteBox";
 import MediaBubble, { type MediaState } from "@/components/MediaBubble";
 import MediaViewer from "@/components/MediaViewer";
 import MoodCard from "@/components/MoodCard";
+import Planner from "@/components/Planner";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
@@ -19,6 +20,7 @@ import {
   compressImage, forgetAllMediaUrls, forgetMediaUrl, formatBytes, mediaUrl, uploadEncrypted, type MediaPayload,
 } from "@/lib/media-client";
 import { MAX_BYTES, type Theme } from "@/lib/media-limits";
+import { countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle, type CycleData, type DayKind } from "@/lib/planner";
 import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from "@/lib/rituals";
 import { enableNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, type Vault } from "@/lib/vault";
@@ -38,8 +40,13 @@ type Space = { label: string; disappearSeconds: number | null; theme: Theme; bac
 type MoodRow = { memberId: string; day: string; iv: string; ct: string; updatedAt: string };
 type Mood = { memberId: string; day: string; key: MoodKey; updatedAt: string };
 type Streak = { today: string; current: number; best: number; todayDone: boolean; sentToday: string[] };
+type SpecialRow = { id: string; kind: DayKind; aboutMember: string | null; month: number; day: number; startYear: number | null; iv: string; ct: string };
+type Special = Omit<SpecialRow, "iv" | "ct"> & { title: string };
+type CycleRow = { memberId: string; iv: string; ct: string };
 type SyncResponse = {
   now: string;
+  specialDays: SpecialRow[];
+  cycles: CycleRow[];
   streak: Streak;
   moods: MoodRow[];
   me: { id: string; role: "host" | "partner"; name: string; spaceId: string };
@@ -47,7 +54,7 @@ type SyncResponse = {
   space: Space;
   messages: Msg[];
 };
-type Info = Omit<SyncResponse, "messages" | "now" | "moods">;
+type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "cycles">;
 type TextPayload = { t: "text"; body: string };
 type Payload = TextPayload | MediaPayload;
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
@@ -108,7 +115,11 @@ export default function ChatPage() {
   const [moodLater, setMoodLater] = useState(false);
   const [moodOpen, setMoodOpen] = useState(false);
   const [streakOpen, setStreakOpen] = useState(false);
-  const [celebrate, setCelebrate] = useState<number | null>(null);
+  const [celebrate, setCelebrate] = useState<{ kicker: string; big: string; label: string; line: string; cta?: string; bigIsText?: boolean } | null>(null);
+  const [specials, setSpecials] = useState<Special[]>([]);
+  const [cycleMap, setCycleMap] = useState<Record<string, CycleData>>({});
+  const plainCache = useRef(new Map<string, unknown>());
+  const [plannerOpen, setPlannerOpen] = useState(false);
   const prevDone = useRef<boolean | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -182,6 +193,31 @@ export default function ChatPage() {
     setMoods((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
   }, []);
 
+  const decryptPlans = useCallback(async (days: SpecialRow[], cycles: CycleRow[]) => {
+    const v = vaultRef.current;
+    if (!v) return;
+    const open = async <T,>(what: "day" | "cycle", id: string, iv: string, ct: string): Promise<T | null> => {
+      const k = `${what}:${id}:${iv}`;
+      if (!plainCache.current.has(k)) {
+        try { plainCache.current.set(k, await decryptJSON<T>(v.encKey, iv, ct, plannerAad(what, v.spaceId, id))); }
+        catch { plainCache.current.set(k, null); }
+      }
+      return plainCache.current.get(k) as T | null;
+    };
+    const out: Special[] = [];
+    for (const d of days) {
+      const p = await open<{ title: string }>("day", d.id, d.iv, d.ct);
+      out.push({ id: d.id, kind: d.kind, aboutMember: d.aboutMember, month: d.month, day: d.day, startYear: d.startYear, title: p?.title ?? "" });
+    }
+    const cm: Record<string, CycleData> = {};
+    for (const c of cycles) {
+      const p = await open<CycleData>("cycle", c.memberId, c.iv, c.ct);
+      if (p) cm[c.memberId] = { ...EMPTY_CYCLE, ...p };
+    }
+    setSpecials((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+    setCycleMap((prev) => (JSON.stringify(prev) === JSON.stringify(cm) ? prev : cm));
+  }, []);
+
   // ---------- sync ----------
   const syncNow = useCallback(async () => {
     if (!vaultRef.current) return;
@@ -193,6 +229,7 @@ export default function ChatPage() {
       cursor.current = data.now;
       setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak });
       void decryptMoods(data.moods ?? []);
+      void decryptPlans(data.specialDays ?? [], data.cycles ?? []);
       if (data.messages.length) {
         setMsgs((prev) => {
           const next = new Map(prev);
@@ -207,7 +244,7 @@ export default function ChatPage() {
       syncing.current = false;
       if (syncAgain.current) { syncAgain.current = false; void syncNow(); }
     }
-  }, [decryptList, decryptMoods, lockOut]);
+  }, [decryptList, decryptMoods, decryptPlans, lockOut]);
 
   useEffect(() => {
     if (!ready) return;
@@ -286,7 +323,12 @@ export default function ChatPage() {
     if (streak.todayDone && isMilestone(streak.current)) {
       const key = `ourspace:celebrated:${info.me.spaceId}:${streak.current}:${streak.today}`;
       try {
-        if (!localStorage.getItem(key)) { localStorage.setItem(key, "1"); setCelebrate(streak.current); }
+        if (!localStorage.getItem(key)) {
+          localStorage.setItem(key, "1");
+          const host = info.members.find((m) => m.role === "host");
+          const guest = info.members.find((m) => m.role === "partner");
+          setCelebrate({ kicker: `${host?.name ?? ""} & ${guest?.name ?? info.space.label}`, big: String(streak.current), label: "days in a row", line: streakLine(streak.current) });
+        }
       } catch { /* private mode */ }
     } else if (prevDone.current === false && streak.todayDone && streak.current > 0) {
       setToast(`Day ${streak.current} together ${LOVE}`);
@@ -294,6 +336,34 @@ export default function ChatPage() {
     prevDone.current = streak.todayDone;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streak?.todayDone, streak?.current]);
+
+  useEffect(() => {
+    if (!info || specials.length === 0) return;
+    const t = localDay();
+    const meId = info.me.id;
+    const nameOf = (id: string | null) => info.members.find((m) => m.id === id)?.name ?? "";
+    const other = info.members.find((m) => m.id !== meId)?.name ?? info.space.label;
+    for (const d of specials) {
+      if (nextOccurrence(d.month, d.day, t) !== t) continue;
+      const key = `ourspace:special:${d.id}:${t}`;
+      try { if (localStorage.getItem(key)) continue; localStorage.setItem(key, "1"); } catch { continue; }
+      const years = d.startYear ? Number(t.slice(0, 4)) - d.startYear : 0;
+      if (d.kind === "birthday") {
+        const mine = d.aboutMember === meId;
+        const who = nameOf(d.aboutMember);
+        setCelebrate(mine
+          ? { kicker: "Today is yours", big: `Happy birthday, ${info.me.name}`, label: years > 0 ? `${years} looks beautiful on you` : "made with love", line: `${other} is celebrating you today. So is this little space.`, cta: "Thank you", bigIsText: true }
+          : { kicker: "Today", big: `It's ${who}'s birthday`, label: years > 0 ? `${who} turns ${years}` : "a day to celebrate", line: `Make today all about ${who}. Start with a message.`, cta: `Celebrate ${who}`, bigIsText: true });
+      } else if (d.kind === "anniversary") {
+        setCelebrate(years > 0
+          ? { kicker: "Happy anniversary", big: String(years), label: years === 1 ? "year together" : "years together", line: "Every one of them chosen. Here's to the next.", cta: "Here's to us" }
+          : { kicker: "Today", big: "Happy anniversary", label: "to the two of you", line: "Here's to everything you are together.", cta: "Here's to us", bigIsText: true });
+      } else {
+        setCelebrate({ kicker: "Today", big: d.title || "A special day", label: "is today", line: "A day that matters to you both. Make it count.", cta: "Celebrate", bigIsText: true });
+      }
+      break;
+    }
+  }, [specials, info]);
 
   useEffect(() => {
     if (!toast) return;
@@ -674,6 +744,24 @@ export default function ChatPage() {
   const iSentToday = st.sentToday.includes(me.id);
   const streakAtRisk = !!partner && st.current >= 2 && !st.todayDone && new Date().getHours() >= 18;
 
+  const upcoming = specials
+    .map((d) => ({ ...d, left: daysBetween(today, nextOccurrence(d.month, d.day, today)) }))
+    // No spoilers: your own birthday only shows on the day.
+    .filter((d) => d.left >= 1 && d.left <= 7 && !(d.kind === "birthday" && d.aboutMember === me.id))
+    .sort((a, b) => a.left - b.left)[0] ?? null;
+  const upcomingText = upcoming
+    ? upcoming.kind === "birthday" ? `${info.members.find((m) => m.id === upcoming.aboutMember)?.name ?? ""}'s birthday is ${countdownLabel(upcoming.left)}. Plan something lovely.`
+      : upcoming.kind === "anniversary" ? `Your anniversary is ${countdownLabel(upcoming.left)}.`
+      : `${upcoming.title || "A special day"} is ${countdownLabel(upcoming.left)}.`
+    : null;
+  const theirCycle = partner ? cycleMap[partner.id] : undefined;
+  const careP = theirCycle?.share ? predictCycle(theirCycle, today) : null;
+  const careText = careP && partner
+    ? careP.inPeriod ? `Day ${careP.periodDay} of ${partner.name}'s period. A little extra care goes a long way.`
+      : careP.daysUntilNext >= 0 && careP.daysUntilNext <= 2 ? `${partner.name}'s period may start ${countdownLabel(careP.daysUntilNext)}. Be extra gentle.`
+      : null
+    : null;
+
   let lastDay = "";
   return (
     <main className="chat" data-theme={info.space.theme}>
@@ -705,6 +793,9 @@ export default function ChatPage() {
             {partner?.notifications === "off" && <span className="pill">notifications off</span>}
           </p>
         </div>
+        <button className="icon-btn" onClick={() => setPlannerOpen(true)} aria-label="Special days, cycle, goals and things to talk about">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>
+        </button>
         {partner && (
           <button className="icon-btn icon-btn--heart" onClick={nudge} aria-label={`Nudge ${partnerName}`}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>
@@ -837,6 +928,10 @@ export default function ChatPage() {
           onLater={() => { setMoodLater(true); setMoodOpen(false); }}
         />
       )}
+      {upcomingText && (
+        <button type="button" className="banner banner--gold" onClick={() => setPlannerOpen(true)}>{upcomingText}</button>
+      )}
+      {careText && <div className="banner banner--care">{careText}</div>}
       {streakAtRisk && (
         <div className="banner banner--warm">
           {iSentToday
@@ -1034,8 +1129,17 @@ export default function ChatPage() {
       {streakOpen && (
         <StreakSheet current={st.current} best={st.best} todayDone={st.todayDone} iSent={iSentToday} partnerName={partnerName} onClose={() => setStreakOpen(false)} />
       )}
-      {celebrate !== null && (
-        <Celebration days={celebrate} names={`${host?.name ?? ""} & ${guest?.name ?? info.space.label}`} onClose={() => setCelebrate(null)} />
+      {celebrate !== null && <Celebration {...celebrate} onClose={() => setCelebrate(null)} />}
+      {plannerOpen && (
+        <Planner
+          vault={vault}
+          me={{ id: me.id, name: me.name }}
+          partner={partner ? { id: partner.id, name: partner.name } : null}
+          today={today}
+          onClose={() => setPlannerOpen(false)}
+          onChanged={() => void syncNow()}
+          onToast={setToast}
+        />
       )}
 
       {toast && <div className="toast" role="status">{toast}</div>}

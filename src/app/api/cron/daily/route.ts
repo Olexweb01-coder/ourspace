@@ -1,10 +1,11 @@
 import { runCleanup } from "@/lib/cleanup";
+import { sendDueReminders } from "@/lib/dispatch";
 import { sendMissingYou, sendStreakReminders } from "@/lib/reminders";
 import { fail, json, safeEqual } from "@/lib/server-utils";
 
 export const maxDuration = 60;
 
-// Vercel Cron, every evening (19:00 UTC = 20:00 in Lagos): streak warnings, missing-you, clean-up.
+// Vercel Cron, every evening (19:00 UTC = 20:00 in Lagos): streak warnings, missing-you, due reminders, clean-up.
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET || "";
   const header = req.headers.get("authorization") || "";
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
   for (const [name, job] of [
     ["streakReminders", sendStreakReminders],
     ["missingYou", sendMissingYou],
+    ["reminders", sendDueReminders],
     ["cleanup", runCleanup],
   ] as const) {
     try {

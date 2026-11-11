@@ -25,6 +25,8 @@ export async function runCleanup(): Promise<{ filesRemoved: number }> {
     sql`delete from sessions where expires_at < now()`,
     sql`delete from invites where expires_at < now() or used_at < now() - interval '30 days'`,
     sql`delete from moods where day < current_date - 400`,
+    sql`delete from care_reminders where sent_at < now() - interval '30 days' or (sent_at is null and notify_at < now() - interval '3 days')`,
+    sql`delete from sent_reminders where sent_at < now() - interval '400 days'`,
   ]);
   return { filesRemoved };
 }

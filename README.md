@@ -50,6 +50,23 @@ Vercel → Settings → Environment Variables into `.env.local`.
 
 Setup: run `db/003_rituals.sql` once in Neon.
 
+## Never forget (Phase 4)
+Open the calendar button in the chat header ("Us, planned"):
+- **Days:** birthdays, your anniversary and custom days. Reminders 7 days before and the day before (the birthday
+  person gets no spoilers), and a full-screen celebration on the day. 29 February birthdays are celebrated on the 28th in other years.
+- **Cycle:** log period starts; predictions come from your own history. Sharing is optional. Reminders only say
+  "a gentle heads-up". Estimates only, not for birth control.
+- **Goals** and **Things to talk about**, with optional reminders for one or both of you.
+
+Privacy: names, notes, goals, topics and cycle dates are encrypted. To remind you on time the server knows special-day
+dates and reminder times, never what they're for.
+
+Timely reminders (optional): Vercel's free plan runs the daily job at 20:00 Lagos only. To get morning-of reminders,
+create a free job on cron-job.org that calls `https://YOUR-APP/api/cron/reminders?key=YOUR_CRON_SECRET` every 15 minutes.
+It never sends anything twice.
+
+Setup: run `db/004_planner.sql` once in Neon.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

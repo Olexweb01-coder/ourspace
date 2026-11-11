@@ -7,11 +7,12 @@ export const MONTHLY_UPLOAD_RESERVE = 150; // leave room for clean-up operations
 export const MEDIA_DAYS = 30;
 export const ENCRYPTION_OVERHEAD = 64; // 12-byte nonce + 16-byte tag, rounded up
 
-export type MediaPurpose = "message" | "avatar" | "background";
+export type MediaPurpose = "message" | "avatar" | "background" | "status";
 export const MAX_BYTES: Record<MediaPurpose, number> = {
   message: 50 * MB,
   avatar: 3 * MB,
   background: 8 * MB,
+  status: 8 * MB,
 };
 
 export const THEMES = ["candle", "rose", "midnight", "blush"] as const;

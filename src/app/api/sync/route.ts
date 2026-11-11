@@ -41,7 +41,8 @@ export async function GET(req: Request) {
               where msg.space_id = ${me.spaceId}
               order by msg.id desc limit 150) t
             order by id::bigint asc`,
-    sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at, avatar_media_id
+    sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at, avatar_media_id,
+          (typing_until > now()) as typing
         from members where space_id = ${me.spaceId}`,
     sql`select label, disappear_seconds, theme, background_media_id, best_streak from spaces where id = ${me.spaceId}`,
     sql`select day::text as day from activity_days
@@ -61,9 +62,12 @@ export async function GET(req: Request) {
     sql`select g.id, g.kind, g.created_by from games g
         where g.space_id = ${me.spaceId} and g.finished_at is null
           and not exists (select 1 from game_answers a where a.game_id = g.id and a.member_id = ${me.memberId})`,
+    sql`delete from statuses where space_id = ${me.spaceId} and expires_at < now()`,
+    sql`select id, member_id, media_id, iv, ciphertext, created_at, expires_at, seen_at from statuses
+        where space_id = ${me.spaceId} and expires_at > now() order by created_at`,
   ]);
 
-  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting] = results;
+  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses] = results;
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
   const st = computeStreak(completeDays, today);
@@ -79,6 +83,7 @@ export async function GET(req: Request) {
       lastSeenAt: m.last_seen_at,
       lastNudgeAt: m.last_nudge_at,
       avatarMediaId: m.avatar_media_id,
+      typing: m.typing === true,
     })),
     space: {
       label: spaces[0]?.label,
@@ -94,6 +99,10 @@ export async function GET(req: Request) {
       sentToday: todayRows[0].sent_today as string[],
     },
     specialDays: specialDays.map((d) => ({ id: d.id, kind: d.kind, aboutMember: d.about_member, month: d.month, day: d.day, startYear: d.start_year, iv: d.iv, ct: d.ciphertext })),
+    statuses: statuses.map((st) => ({
+      id: st.id, memberId: st.member_id, mediaId: st.media_id, iv: st.iv, ct: st.ciphertext,
+      createdAt: st.created_at, expiresAt: st.expires_at, seenAt: st.seen_at,
+    })),
     gamesWaiting: gamesWaiting.map((g) => ({ id: g.id, kind: g.kind, createdBy: g.created_by })),
     cycles: cycles.map((c) => ({ memberId: c.member_id, iv: c.iv, ct: c.ciphertext })),
     moods: moods.map((m) => ({ memberId: m.member_id, day: m.day, iv: m.iv, ct: m.ciphertext, updatedAt: m.updated_at })),

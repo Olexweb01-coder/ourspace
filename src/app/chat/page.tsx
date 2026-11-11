@@ -2,6 +2,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import BondMark from "@/components/BondMark";
+import Composer from "@/components/chat/Composer";
+import Drawer, { DrawerItem } from "@/components/chat/Drawer";
+import Header from "@/components/chat/Header";
+import MessageRow, { MessageMenu, type ReplyRef } from "@/components/chat/MessageRow";
+import StatusComposer from "@/components/status/StatusComposer";
+import StatusViewer from "@/components/status/StatusViewer";
+import { statusAad, type StatusItem, type StatusPayload } from "@/lib/status";
 import Celebration, { streakLine } from "@/components/Celebration";
 import InviteBox from "@/components/InviteBox";
 import MediaBubble, { type MediaState } from "@/components/MediaBubble";
@@ -34,6 +41,7 @@ type Member = {
   id: string; role: "host" | "partner"; name: string; banned: boolean;
   notifications: "on" | "off" | "unknown"; lastSeenAt: string | null; lastNudgeAt: string | null;
   avatarMediaId: string | null;
+  typing?: boolean;
 };
 type Msg = {
   id: string; senderId: string; kind: string; viewOnce: boolean; viewedAt: string | null; deleted: boolean;
@@ -48,9 +56,11 @@ type SpecialRow = { id: string; kind: DayKind; aboutMember: string | null; month
 type Special = Omit<SpecialRow, "iv" | "ct"> & { title: string };
 type CycleRow = { memberId: string; iv: string; ct: string };
 type WaitingGame = { id: string; kind: "wyr" | "tot" | "know"; createdBy: string };
+type StatusRow = { id: string; memberId: string; mediaId: string | null; iv: string; ct: string; createdAt: string; expiresAt: string; seenAt: string | null };
 type SyncResponse = {
   now: string;
   gamesWaiting: WaitingGame[];
+  statuses: StatusRow[];
   specialDays: SpecialRow[];
   cycles: CycleRow[];
   streak: Streak;
@@ -60,9 +70,9 @@ type SyncResponse = {
   space: Space;
   messages: Msg[];
 };
-type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "cycles">;
+type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "cycles" | "statuses">;
 type TextPayload = { t: "text"; body: string };
-type Payload = TextPayload | MediaPayload;
+type Payload = (TextPayload | MediaPayload) & { reply?: ReplyRef };
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
 type Upload = { id: string; label: string; pct: number };
 type OnceView = { kind: "text"; text: string } | { kind: "photo" | "video" | "voice"; url: string; mediaId: string; caption?: string };
@@ -104,7 +114,6 @@ export default function ChatPage() {
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [recording, setRecording] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [once, setOnce] = useState<OnceView | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [invite, setInvite] = useState<{ inviteUrl: string; expiresAt: string } | null>(null);
@@ -129,6 +138,23 @@ export default function ChatPage() {
   const [gamesOpen, setGamesOpen] = useState(false);
   const [lockKind, setLockKind] = useState<LockKind | null>(null);
   const [lockSetupOpen, setLockSetupOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [reply, setReply] = useState<ReplyRef | null>(null);
+  const [menuFor, setMenuFor] = useState<{ m: Msg; rect: DOMRect } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<StatusItem[]>([]);
+  const statusCache = useRef(new Map<string, StatusPayload | null>());
+  const [statusView, setStatusView] = useState<"mine" | "theirs" | null>(null);
+  const [statusCompose, setStatusCompose] = useState(false);
+  const [atBottomUI, setAtBottomUI] = useState(true);
+  const [newBelow, setNewBelow] = useState(0);
+  const prevLastId = useRef<string | null>(null);
+  const lastTypingPing = useRef(0);
+  const topRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const [topH, setTopH] = useState(120);
+  const [bottomH, setBottomH] = useState(72);
   const prevDone = useRef<boolean | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -228,6 +254,21 @@ export default function ChatPage() {
     setCycleMap((prev) => (JSON.stringify(prev) === JSON.stringify(cm) ? prev : cm));
   }, []);
 
+  const decryptStatuses = useCallback(async (rows: StatusRow[]) => {
+    const v = vaultRef.current;
+    if (!v) return;
+    const out: StatusItem[] = [];
+    for (const r of rows) {
+      const k = `${r.id}:${r.iv}`;
+      if (!statusCache.current.has(k)) {
+        try { statusCache.current.set(k, await decryptJSON<StatusPayload>(v.encKey, r.iv, r.ct, statusAad(v.spaceId, r.id))); }
+        catch { statusCache.current.set(k, null); }
+      }
+      out.push({ id: r.id, memberId: r.memberId, mediaId: r.mediaId, createdAt: r.createdAt, expiresAt: r.expiresAt, seenAt: r.seenAt, payload: statusCache.current.get(k) ?? null });
+    }
+    setStatuses((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+  }, []);
+
   // ---------- sync ----------
   const syncNow = useCallback(async () => {
     if (!vaultRef.current) return;
@@ -240,6 +281,7 @@ export default function ChatPage() {
       setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [] });
       void decryptMoods(data.moods ?? []);
       void decryptPlans(data.specialDays ?? [], data.cycles ?? []);
+      void decryptStatuses(data.statuses ?? []);
       if (data.messages.length) {
         setMsgs((prev) => {
           const next = new Map(prev);
@@ -254,7 +296,7 @@ export default function ChatPage() {
       syncing.current = false;
       if (syncAgain.current) { syncAgain.current = false; void syncNow(); }
     }
-  }, [decryptList, decryptMoods, decryptPlans, lockOut]);
+  }, [decryptList, decryptMoods, decryptPlans, decryptStatuses, lockOut]);
 
   useEffect(() => {
     if (!ready) return;
@@ -416,9 +458,10 @@ export default function ChatPage() {
     atBottom.current = true;
   }
 
-  async function postMessage(payload: Payload, mediaId?: string, once: boolean = viewOnce) {
+  async function postMessage(base: Payload, mediaId?: string, once: boolean = viewOnce) {
     const v = vaultRef.current;
     if (!v) throw new Error("locked");
+    const payload: Payload = reply ? { ...base, reply } : base;
     const sentOnce = once;
     const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
     const res = await api<{ id: string; createdAt: string; expiresAt: string | null; mediaExpiresAt: string | null }>("/api/messages", {
@@ -427,6 +470,7 @@ export default function ChatPage() {
     payloads.current.set(res.id, payload);
     addLocal(v, res.id, payload.t, res, iv, ct, sentOnce, mediaId);
     setViewOnce(false);
+    setReply(null);
     void syncNow();
   }
 
@@ -549,24 +593,13 @@ export default function ChatPage() {
       copy.set(m.id, { ...m, reactions });
       return copy;
     });
-    setActiveId(null);
+    setMenuFor(null);
     try {
       await api(`/api/messages/${m.id}/react`, { body: { reaction: next } });
     } catch (err) {
       setToast(err instanceof ApiError ? err.message : "Couldn't react. Try again.");
       void syncNow();
     }
-  }
-
-  function tapBubble(m: Msg) {
-    const now = Date.now();
-    if (lastTap.current && lastTap.current.id === m.id && now - lastTap.current.at < 320) {
-      lastTap.current = null;
-      void react(m, "love"); // double tap = love
-      return;
-    }
-    lastTap.current = { id: m.id, at: now };
-    setActiveId((cur) => (cur === m.id ? null : m.id));
   }
 
   async function keep(m: Msg, value: boolean) {
@@ -734,6 +767,87 @@ export default function ChatPage() {
     lockOut();
   }
 
+  // ---------- layout helpers ----------
+  // The glass header and composer float over the messages; the list is padded by their real height.
+  const hasInfo = !!info;
+  useEffect(() => {
+    if (!hasInfo) return;
+    const measure = () => {
+      if (topRef.current) setTopH(topRef.current.offsetHeight);
+      if (bottomRef.current) setBottomH(bottomRef.current.offsetHeight);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (topRef.current) ro.observe(topRef.current);
+    if (bottomRef.current) ro.observe(bottomRef.current);
+    return () => ro.disconnect();
+  }, [hasInfo, recording]);
+
+  // Count new messages from them that arrive while you're scrolled up.
+  useEffect(() => {
+    const last = visible[visible.length - 1];
+    if (!last) return;
+    if (prevLastId.current && last.id !== prevLastId.current && !atBottom.current && last.senderId !== vaultRef.current?.memberId) {
+      setNewBelow((n) => n + 1);
+    }
+    prevLastId.current = last.id;
+  }, [visible]);
+
+  function scrollToBottom() {
+    const el = listRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setNewBelow(0);
+  }
+
+  function onDraftChange(value: string) {
+    setDraft(onlyLoveAndAngry(value));
+    const now = Date.now();
+    if (value && now - lastTypingPing.current > 4000) {
+      lastTypingPing.current = now;
+      api("/api/typing", { method: "POST" }).catch(() => {});
+    }
+  }
+
+  function previewOf(m: Msg): string {
+    if (m.viewOnce) return "View once";
+    const p = payloads.current.get(m.id);
+    if (!p) return "Message";
+    if (p.t === "text") return p.body.length > 90 ? `${p.body.slice(0, 90)}…` : p.body;
+    const cap = "caption" in p && p.caption ? `: ${p.caption.slice(0, 60)}` : "";
+    return `${NOUN[p.t]}${cap}`;
+  }
+
+  function startReply(m: Msg) {
+    setReply({ id: m.id, from: m.senderId, preview: previewOf(m) });
+    setMenuFor(null);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
+  function jumpTo(id: string) {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return setToast("That message is too far back to jump to.");
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlash(id);
+    setTimeout(() => setFlash((f) => (f === id ? null : f)), 1600);
+  }
+
+  async function copyMessage(m: Msg) {
+    const p = payloads.current.get(m.id);
+    setMenuFor(null);
+    if (p?.t !== "text") return;
+    try { await navigator.clipboard.writeText(p.body); setToast("Copied"); } catch { setToast("Couldn't copy that."); }
+  }
+
+  function markStatusSeen(id: string) {
+    setStatuses((list) => list.map((x) => (x.id === id ? { ...x, seenAt: new Date().toISOString() } : x)));
+    api("/api/status", { body: { action: "seen", id } }).catch(() => {});
+  }
+
+  function deleteStatus(id: string) {
+    setStatuses((list) => list.filter((x) => x.id !== id));
+    api("/api/status", { body: { action: "delete", id } }).catch(() => setToast("Couldn't delete it."));
+  }
+
   // ---------- render ----------
   if (!ready || !info || !me) return <main className="gate" aria-busy="true" />;
   const vault = vaultRef.current as Vault;
@@ -785,388 +899,383 @@ export default function ChatPage() {
       : null
     : null;
 
-  let lastDay = "";
-  return (
-    <main className="chat" data-theme={info.space.theme}>
-      {backgroundUrl && <div className="chat__bg" style={{ backgroundImage: `url(${backgroundUrl})` }} aria-hidden="true" />}
+  const myStatuses = statuses.filter((x) => x.memberId === me.id);
+  const theirStatuses = partner ? statuses.filter((x) => x.memberId === partner.id) : [];
+  const theirUnseen = theirStatuses.some((x) => !x.seenAt);
+  const typing = !!partner?.typing;
+  const nameOf = (id: string) => (id === me.id ? "You" : info.members.find((m) => m.id === id)?.name ?? partnerName);
+  const gamesWaiting = info.gamesWaiting?.length > 0 && info.gamesWaiting.some((g) => g.createdBy !== me.id);
 
-      <header className="chat__head">
-        <BondMark
-          size={40}
-          a={initial(host?.name)}
-          b={initial(guest?.name ?? info.space.label)}
-          aSrc={host ? avatars[host.id] : null}
-          bSrc={guest ? avatars[guest.id] : null}
-          alive={online}
-          title={`${me.name} and ${partnerName}`}
-        />
-        <div className="chat__who">
-          <h1 className="chat__name">{partnerName}</h1>
-          <p className={online ? "chat__status chat__status--live" : "chat__status"}>
-              {partner && (
-              <button type="button" className={st.todayDone ? "streak-pill streak-pill--done" : "streak-pill"} onClick={() => setStreakOpen(true)}
-                aria-label={`${st.current} day streak. Open streak details`}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>
-                {st.current}
+  // Small glass notices under the header, instead of big banners.
+  type Notice = { key: string; text: string; tone?: "gold" | "care" | "warm" | "warn"; onClick?: () => void };
+  const notices: Notice[] = [];
+  if (partnerMood && partner) notices.push({ key: "pm", text: `${partner.name} feels ${partnerMood.label.toLowerCase()}. ${partnerMood.hint(partner.name)}`, tone: "warm" });
+  if (partner && !myMood) notices.push({ key: "mm", text: "How are you feeling today?", tone: "gold", onClick: () => setMoodOpen(true) });
+  if (streakAtRisk) notices.push({ key: "sr", text: iSentToday ? `Waiting on ${partnerName}. ${st.current}-day streak ends at midnight.` : `Your ${st.current}-day streak ends at midnight.`, tone: "warn", onClick: () => setStreakOpen(true) });
+  if (gamesWaiting && partner) notices.push({ key: "gw", text: `${partner.name} started a game. Your turn.`, tone: "gold", onClick: () => setGamesOpen(true) });
+  if (upcomingText) notices.push({ key: "up", text: upcomingText, tone: "gold", onClick: () => setPlannerOpen(true) });
+  if (careText) notices.push({ key: "care", text: careText, tone: "care" });
+  if (partner && awayDays >= 1) notices.push({ key: "away", text: partner.notifications === "off" ? `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}, notifications off.` : `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}. Your messages will reach them.`, tone: "care" });
+  if (showInstall) notices.push({ key: "inst", text: `Add ${APP_NAME} to your Home Screen: Share, then Add to Home Screen.` });
+  if (showNotifAsk) notices.push({ key: "notif", text: notif === "off" ? `Notifications are off here, and ${partnerName} can see that. Turn on` : "Turn on notifications so nudges reach you.", tone: "warn", onClick: turnOnNotifications });
+  if (welcome) notices.push({ key: "wel", text: "You're in. Everything here is locked with your shared password.", onClick: () => setWelcome(false) });
+
+  const mark = (size: number) => (
+    <BondMark
+      size={size}
+      a={initial(host?.name)}
+      b={initial(guest?.name ?? info.space.label)}
+      aSrc={host ? avatars[host.id] : null}
+      bSrc={guest ? avatars[guest.id] : null}
+      alive={online}
+      title={`${me.name} and ${partnerName}`}
+    />
+  );
+
+  const sub = typing ? <span className="typing">typing<i /><i /><i /></span>
+    : partner ? <>{sinceLabel(partner.lastSeenAt)}{partner.notifications === "off" && <span className="pill">notifications off</span>}</>
+    : "hasn't joined yet";
+
+  let lastDay = "";
+  let lastSender = "";
+  let lastTime = 0;
+  return (
+    <main className="shell" data-theme={info.space.theme}>
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <div className="dcard">
+          <span className="dcard__mark">{mark(72)}</span>
+          <p className="dcard__names">{host?.name ?? ""} <span>&amp;</span> {guest?.name ?? info.space.label}</p>
+          <p className="dcard__line">
+            {st.current > 0 ? `${st.current} ${st.current === 1 ? "day" : "days"} in a row` : "Start your streak today"}
+            {myMood ? ` · you feel ${moodOf(myMood)?.label.toLowerCase()}` : ""}
+          </p>
+        </div>
+
+        <div className="dsec">
+          <p className="dsec__title">Status</p>
+          <div className="srow">
+            <button type="button" className="sbubble" onClick={() => (myStatuses.length ? setStatusView("mine") : setStatusCompose(true))}>
+              <span className={myStatuses.length ? "sbubble__ring sbubble__ring--seen" : "sbubble__ring"}>
+                <span className="sbubble__face">{myAvatar && avatars[me.id] ? <img src={avatars[me.id]} alt="" /> : initial(me.name)}</span>
+                <span className="sbubble__plus" aria-hidden="true" onClick={(e) => { e.stopPropagation(); setStatusCompose(true); }}>+</span>
+              </span>
+              <span className="sbubble__label">My status<small>{myStatuses.length ? `${myStatuses.length} today` : "Tap to add"}</small></span>
+            </button>
+            {partner && theirStatuses.length > 0 && (
+              <button type="button" className="sbubble" onClick={() => setStatusView("theirs")}>
+                <span className={theirUnseen ? "sbubble__ring sbubble__ring--new" : "sbubble__ring sbubble__ring--seen"}>
+                  <span className="sbubble__face">{avatars[partner.id] ? <img src={avatars[partner.id]} alt="" /> : initial(partner.name)}</span>
+                </span>
+                <span className="sbubble__label">{partner.name}<small>{theirUnseen ? "New" : "Seen"}</small></span>
               </button>
             )}
-            {partner ? sinceLabel(partner.lastSeenAt) : "hasn't joined yet"}
-            {partner?.notifications === "off" && <span className="pill">notifications off</span>}
-          </p>
+          </div>
+          <p className="hint">Only the two of you see these. They disappear after 24 hours.</p>
         </div>
-        <button className="icon-btn" onClick={() => setGamesOpen(true)} aria-label="Games">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>
-          {(info.gamesWaiting?.length ?? 0) > 0 && <span className="dot-badge" aria-label="A game is waiting for you" />}
-        </button>
-        <button className="icon-btn" onClick={() => setPlannerOpen(true)} aria-label="Special days, cycle, goals and things to talk about">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>
-        </button>
-        {partner && (
-          <button className="icon-btn icon-btn--heart" onClick={nudge} aria-label={`Nudge ${partnerName}`}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>
-          </button>
-        )}
-        <button className="icon-btn" onClick={() => setMenuOpen((o) => !o)} aria-expanded={menuOpen} aria-label="Settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
-        </button>
-      </header>
 
-      {menuOpen && (
-        <section className="sheet" aria-label="Settings">
-          <div className="sheet__group">
-            <p className="sheet__title">Your photo</p>
-            <div className="row">
-              <button className="btn btn--ghost" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
-                {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change photo" : "Add a photo"}
-              </button>
-              {myAvatar && <button className="btn btn--ghost" onClick={removeAvatar}>Remove</button>}
-            </div>
-            <p className="hint">It fills your circle at the top of the chat. Only the two of you can see it.</p>
-          </div>
+        <div className="dsec">
+          <DrawerItem label="Feelings today" hint={myMood ? `You: ${moodOf(myMood)?.label}` : "Share how you feel"} onClick={() => { setDrawerOpen(false); setMoodOpen(true); }}
+            icon={<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18z" /></svg>} />
+          <DrawerItem label="Us, planned" hint="Special days, cycle, goals, talk" onClick={() => { setDrawerOpen(false); setPlannerOpen(true); }}
+            icon={<svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>} />
+          <DrawerItem label="Play together" hint={gamesWaiting ? "A game is waiting for you" : "Games and cards"} badge={gamesWaiting} onClick={() => { setDrawerOpen(false); setGamesOpen(true); }}
+            icon={<svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>} />
+          <DrawerItem label="Our streak" hint={`${st.current} now · longest ${st.best}`} onClick={() => { setDrawerOpen(false); setStreakOpen(true); }}
+            icon={<svg viewBox="0 0 24 24"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>} />
+          <DrawerItem label="Settings" hint="Photo, theme, lock, storage and more" onClick={() => setMenuOpen((o) => !o)}
+            icon={<svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)" /></svg>} />
+        </div>
 
-          <div className="sheet__group">
-            <p className="sheet__title">Theme</p>
-            <div className="chips">
-              {THEME_OPTIONS.map((t) => (
-                <button key={t.value} className={t.value === info.space.theme ? "chip chip--on" : "chip"} onClick={() => saveSettings({ theme: t.value }, `${t.label} theme on`)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="sheet__group">
-            <p className="sheet__title">Chat background</p>
-            <div className="row">
-              <button className="btn btn--ghost" onClick={() => backgroundInput.current?.click()} disabled={busySetting === "background"}>
-                {busySetting === "background" ? "Uploading…" : info.space.backgroundMediaId ? "Change background" : "Choose a photo"}
-              </button>
-              {info.space.backgroundMediaId && (
-                <button className="btn btn--ghost" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>
-              )}
-            </div>
-            <p className="hint">Either of you can set it, and you both see it.</p>
-          </div>
-
-          <div className="sheet__group">
-            <p className="sheet__title">Disappearing messages</p>
-            <div className="chips">
-              {DISAPPEAR_OPTIONS.map((o) => (
-                <button key={o.label} className={o.value === disappear.value ? "chip chip--on" : "chip"}
-                  onClick={() => saveSettings({ disappearSeconds: o.value }, o.value === null ? "Messages stay" : "New messages will disappear")}>
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            <p className="hint">Either of you can change this. It applies to new messages.</p>
-          </div>
-
-          <div className="sheet__group">
-            <p className="sheet__title">Storage</p>
-            {usage ? (
-              <>
-                <div className="meter" role="img" aria-label={`${usedPct}% of storage used`}><span style={{ width: `${usedPct}%` }} /></div>
-                <p className="hint">
-                  {formatBytes(usage.totalBytes)} of {formatBytes(usage.limitBytes)} used. Your space: {formatBytes(usage.spaceBytes)}, of which {formatBytes(usage.keptBytes)} is kept.
-                  {" "}Uploads this month: {usage.uploadsThisMonth} of {usage.uploadLimit.toLocaleString()}.
-                </p>
-                <p className="hint">Photos, videos, voice notes and files disappear after 30 days unless one of you keeps them.</p>
-              </>
-            ) : <p className="hint">Checking…</p>}
-          </div>
-
-          <div className="sheet__group">
-            <p className="sheet__title">App lock on this phone</p>
-            {lockKind
-              ? <p className="hint">Opens with your {LOCK_LABEL[lockKind].toLowerCase()}. The shared password always works too.</p>
-              : <p className="hint">Off. You type the shared password each time you open the app.</p>}
-            <div className="row">
-              <button className="btn btn--ghost" onClick={() => setLockSetupOpen(true)}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
-              {lockKind && (
-                <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>
-                  Turn off
-                </button>
-              )}
-            </div>
-          </div>
-
-          {me.role === "host" && (
+        {menuOpen && (
+          <section className="dsettings" aria-label="Settings">
             <div className="sheet__group">
-              <p className="sheet__title">Another space</p>
-              <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
-              <p className="hint">A completely separate space with its own password. No setup key needed.</p>
+              <p className="sheet__title">Your photo</p>
+              <div className="row">
+                <button className="btn btn--ghost" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
+                  {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change photo" : "Add a photo"}
+                </button>
+                {myAvatar && <button className="btn btn--ghost" onClick={removeAvatar}>Remove</button>}
+              </div>
             </div>
-          )}
-
-          {me.role === "host" && (
             <div className="sheet__group">
-              <p className="sheet__title">Host password</p>
-              <HostPasswordForm onToast={setToast} />
+              <p className="sheet__title">Theme</p>
+              <div className="chips chips--left">
+                {THEME_OPTIONS.map((t) => (
+                  <button key={t.value} className={t.value === info.space.theme ? "chip chip--on" : "chip"} onClick={() => saveSettings({ theme: t.value }, `${t.label} theme on`)}>{t.label}</button>
+                ))}
+              </div>
             </div>
-          )}
-
-          <div className="sheet__group">
-            <p className="sheet__title">Notifications on this phone</p>
-            {notif === "on"
-              ? <p className="hint">On. {partnerName} will see if you turn them off.</p>
-              : <button className="btn btn--ghost" onClick={turnOnNotifications}>Turn on notifications</button>}
-          </div>
-
-          {me.role === "host" && (
             <div className="sheet__group">
-              <p className="sheet__title">Invite link</p>
-              {invite
-                ? <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />
-                : <button className="btn btn--ghost" onClick={makeInvite}>{partner ? "Make a link for her new phone" : "Make an invite link"}</button>}
+              <p className="sheet__title">Chat background</p>
+              <div className="row">
+                <button className="btn btn--ghost" onClick={() => backgroundInput.current?.click()} disabled={busySetting === "background"}>
+                  {busySetting === "background" ? "Uploading…" : info.space.backgroundMediaId ? "Change background" : "Choose a photo"}
+                </button>
+                {info.space.backgroundMediaId && <button className="btn btn--ghost" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>}
+              </div>
             </div>
-          )}
-
-          <div className="sheet__group">
-            <button className="btn btn--ghost" onClick={lockNow}>Lock now</button>
-          </div>
-        </section>
-      )}
-
-      {showInstall && (
-        <div className="banner">
-          Add {APP_NAME} to your Home Screen: tap Share, then <strong>Add to Home Screen</strong>. Notifications only work from there.
-        </div>
-      )}
-      {showNotifAsk && (
-        <div className="banner">
-          {notif === "off" ? `Notifications are off here, and ${partnerName} can see that.` : "Turn on notifications so nudges and messages reach you."}
-          <button className="btn btn--small" onClick={turnOnNotifications}>Turn on</button>
-        </div>
-      )}
-      {(partnerMood || (myMood && !showMoodCard)) && (
-        <div className="moodstrip">
-          {partnerMood && partner && (
-            <p className="moodstrip__them" style={{ ["--mood" as string]: partnerMood.color }}>
-              <span className="mood__dot" aria-hidden="true" />
-              <span><strong>{partner.name} feels {partnerMood.label.toLowerCase()}.</strong> {partnerMood.hint(partner.name)}</span>
-            </p>
-          )}
-          {!showMoodCard && (
-            <button type="button" className="moodstrip__me" onClick={() => setMoodOpen(true)}>
-              {myMood ? <>You: {moodOf(myMood)?.label} <span className="link-btn">Change</span></> : <span className="link-btn">Share how you feel today</span>}
-            </button>
-          )}
-        </div>
-      )}
-      {showMoodCard && (
-        <MoodCard
-          myName={me.name}
-          partnerName={partnerName}
-          guesses={guesses}
-          current={myMood}
-          onPick={pickMood}
-          onLater={() => { setMoodLater(true); setMoodOpen(false); }}
-        />
-      )}
-      {info.gamesWaiting?.length > 0 && partner && info.gamesWaiting.some((g) => g.createdBy !== me.id) && (
-        <button type="button" className="banner banner--warm" onClick={() => setGamesOpen(true)}>
-          {partner.name} started a game. Your turn to play.
-        </button>
-      )}
-      {upcomingText && (
-        <button type="button" className="banner banner--gold" onClick={() => setPlannerOpen(true)}>{upcomingText}</button>
-      )}
-      {careText && <div className="banner banner--care">{careText}</div>}
-      {streakAtRisk && (
-        <div className="banner banner--warm">
-          {iSentToday
-            ? `Waiting on ${partnerName}. Your ${st.current}-day streak ends at midnight.`
-            : `Your ${st.current}-day streak ends at midnight. Send ${partnerName} something.`}
-        </div>
-      )}
-      {partner && awayDays >= 1 && (
-        <div className="away-card">
-          <p><strong>{partner.name} has been away {awayDays} {awayDays === 1 ? "day" : "days"}.</strong></p>
-          <p className="hint">
-            {partner.notifications === "off"
-              ? `${partner.name}'s notifications are off, so nothing will alert them. Everything you send will be here when they're back.`
-              : `Every message will reach ${partner.name}, along with a little reminder that you miss each other.`}
-          </p>
-        </div>
-      )}
-      {welcome && (
-        <div className="banner banner--warm">
-          You&apos;re in. Everything here is locked with your shared password.
-          <button className="btn btn--small btn--ghost" onClick={() => setWelcome(false)}>Got it</button>
-        </div>
-      )}
-
-      <div
-        className="chat__list"
-        ref={listRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        }}
-      >
-        {visible.length === 0 && uploads.length === 0 && (
-          <div className="empty">
-            {partner
-              ? <p>Nothing here yet. Say the first thing.</p>
-              : (
+            <div className="sheet__group">
+              <p className="sheet__title">Disappearing messages</p>
+              <div className="chips chips--left">
+                {DISAPPEAR_OPTIONS.map((o) => (
+                  <button key={o.label} className={o.value === disappear.value ? "chip chip--on" : "chip"}
+                    onClick={() => saveSettings({ disappearSeconds: o.value }, o.value === null ? "Messages stay" : "New messages will disappear")}>{o.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Storage</p>
+              {usage ? (
                 <>
-                  <p>{info.space.label} hasn&apos;t joined yet. Send her the invite link.</p>
+                  <div className="meter" role="img" aria-label={`${usedPct}% of storage used`}><span style={{ width: `${usedPct}%` }} /></div>
+                  <p className="hint">{formatBytes(usage.totalBytes)} of {formatBytes(usage.limitBytes)} used, {formatBytes(usage.keptBytes)} kept. Uploads this month: {usage.uploadsThisMonth} of {usage.uploadLimit.toLocaleString()}.</p>
+                </>
+              ) : <p className="hint">Checking…</p>}
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">App lock on this phone</p>
+              <p className="hint">{lockKind ? `Opens with your ${LOCK_LABEL[lockKind].toLowerCase()}.` : "Off. You type the shared password each time."}</p>
+              <div className="row">
+                <button className="btn btn--ghost" onClick={() => setLockSetupOpen(true)}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
+                {lockKind && <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Notifications on this phone</p>
+              {notif === "on" ? <p className="hint">On. {partnerName} will see if you turn them off.</p>
+                : <button className="btn btn--ghost" onClick={turnOnNotifications}>Turn on notifications</button>}
+            </div>
+            {me.role === "host" && (
+              <>
+                <div className="sheet__group">
+                  <p className="sheet__title">Invite link</p>
+                  {invite ? <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />
+                    : <button className="btn btn--ghost" onClick={makeInvite}>{partner ? `Make a link for ${partner.name}'s new phone` : "Make an invite link"}</button>}
+                </div>
+                <div className="sheet__group">
+                  <p className="sheet__title">Another space</p>
+                  <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
+                </div>
+                <div className="sheet__group">
+                  <p className="sheet__title">Host password</p>
+                  <HostPasswordForm onToast={setToast} />
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        <div className="dsec dsec--foot">
+          <button className="btn btn--ghost btn--wide" onClick={lockNow}>Lock now</button>
+        </div>
+      </Drawer>
+
+      <section className="pane">
+        <div className="pane__bg" style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})` } : undefined} aria-hidden="true" />
+
+        <div className="pane__top" ref={topRef}>
+          <Header
+            mark={mark(40)}
+            name={partnerName}
+            sub={sub}
+            live={online}
+            statusRing={theirStatuses.length === 0 ? "none" : theirUnseen ? "new" : "seen"}
+            streak={partner ? { count: st.current, done: st.todayDone } : null}
+            onMenu={() => setDrawerOpen(true)}
+            onWho={() => (theirUnseen ? setStatusView("theirs") : setDrawerOpen(true))}
+            onStreak={() => setStreakOpen(true)}
+            onNudge={partner ? nudge : null}
+            nudgeLabel={`Nudge ${partnerName}`}
+          />
+          {notices.length > 0 && (
+            <div className="notices" role="list">
+              {notices.map((n) => (
+                n.onClick
+                  ? <button key={n.key} type="button" role="listitem" className={`notice glass${n.tone ? ` notice--${n.tone}` : ""}`} onClick={n.onClick}>{n.text}</button>
+                  : <p key={n.key} role="listitem" className={`notice glass${n.tone ? ` notice--${n.tone}` : ""}`}>{n.text}</p>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="list"
+          ref={listRef}
+          style={{ paddingTop: topH + 8, paddingBottom: bottomH + 12 }}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            atBottom.current = bottom;
+            if (bottom !== atBottomUI) setAtBottomUI(bottom);
+            if (bottom && newBelow) setNewBelow(0);
+          }}
+        >
+          <p className="e2e-note glass">Messages, photos and voice notes here are end-to-end encrypted. Only the two of you can read them.</p>
+
+          {visible.length === 0 && uploads.length === 0 && (
+            <div className="empty">
+              {partner ? <p>Nothing here yet. Say the first thing.</p> : (
+                <>
+                  <p>{info.space.label} hasn&apos;t joined yet. Send the invite link.</p>
                   {me.role === "host" && !invite && <button className="btn" onClick={makeInvite}>Make an invite link</button>}
                   {invite && <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />}
                 </>
               )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {visible.map((m) => {
-          const mine = m.senderId === me.id;
-          const day = dayLabel(m.createdAt);
-          const showDay = day !== lastDay;
-          lastDay = day;
-          const payload = payloads.current.get(m.id);
-          const reactions = Object.values(m.reactions);
-          const noun = NOUN[m.kind] ?? "Message";
-          return (
-            <div key={m.id} className="msg-wrap">
-              {showDay && <p className="day">{day}</p>}
-              <div className={mine ? "msg msg--mine" : "msg"}>
-                {m.viewOnce ? (
-                  mine ? (
-                    <div className="bubble bubble--once">{m.deleted || m.viewedAt ? "Opened" : `${noun}, view once, sent`}</div>
-                  ) : m.deleted || m.viewedAt ? (
-                    <div className="bubble bubble--once">Viewed</div>
-                  ) : (
-                    <button className="bubble bubble--once bubble--sealed" onClick={() => openOnce(m)}>
-                      {noun} to see once. Tap to open.
-                    </button>
-                  )
-                ) : payload && payload.t !== "text" ? (
-                  <div className="bubble bubble--media" onDoubleClick={() => react(m, "love")}>
+          {visible.map((m) => {
+            const mine = m.senderId === me.id;
+            const day = dayLabel(m.createdAt);
+            const showDay = day !== lastDay;
+            const t = new Date(m.createdAt).getTime();
+            const groupStart = showDay || lastSender !== m.senderId || t - lastTime > 5 * 60_000;
+            lastDay = day; lastSender = m.senderId; lastTime = t;
+            const payload = payloads.current.get(m.id);
+            const noun = NOUN[m.kind] ?? "Message";
+            const seen = !!partner?.lastSeenAt && new Date(partner.lastSeenAt).getTime() >= t;
+            const isMedia = !!payload && payload.t !== "text" && !m.viewOnce;
+            return (
+              <div key={m.id}>
+                {showDay && <p className="daypill glass">{day}</p>}
+                <MessageRow
+                  id={m.id}
+                  mine={mine}
+                  groupStart={groupStart}
+                  time={timeOf(m.createdAt)}
+                  disappears={!!m.expiresAt}
+                  ticks={mine && !m.viewOnce ? (seen ? "seen" : "sent") : "none"}
+                  reply={payload && "reply" in payload && payload.reply ? payload.reply : null}
+                  replyName={nameOf}
+                  reactions={Object.values(m.reactions)}
+                  highlighted={flash === m.id}
+                  wide={isMedia}
+                  canReply={!m.viewOnce && !!partner}
+                  onReply={() => startReply(m)}
+                  onMenu={(rect) => setMenuFor({ m, rect })}
+                  onLove={() => { if (!m.viewOnce) void react(m, "love"); }}
+                  onJump={jumpTo}
+                >
+                  {m.viewOnce ? (
+                    mine ? <span className="b__once">{m.deleted || m.viewedAt ? "Opened" : `${noun}, view once`}</span>
+                      : m.deleted || m.viewedAt ? <span className="b__once">Viewed</span>
+                      : <button type="button" className="b__sealed" onClick={() => openOnce(m)}>{noun} to see once. Tap to open.</button>
+                  ) : isMedia ? (
                     <MediaBubble
-                      payload={payload}
+                      payload={payload as MediaPayload}
                       media={m.media}
                       vault={vault}
                       partnerName={partnerName}
                       meId={me.id}
                       onKeep={(k) => keep(m, k)}
-                      onReact={() => setActiveId((c) => (c === m.id ? null : m.id))}
+                      onReact={() => { const el = document.getElementById(`msg-${m.id}`); if (el) setMenuFor({ m, rect: el.getBoundingClientRect() }); }}
                       onToast={setToast}
                     />
-                  </div>
-                ) : (
-                  <button className="bubble" onClick={() => tapBubble(m)} aria-label="Message. Tap to react, double tap to love.">
-                    {payload === undefined ? <span className="muted">Unlocking…</span>
-                      : payload === null ? <span className="muted">Couldn&apos;t unlock this message</span>
-                      : payload.body}
-                  </button>
-                )}
-                <span className="meta">
-                  {m.expiresAt && <span aria-label="Disappears">⏳ </span>}
-                  {timeOf(m.createdAt)}
-                </span>
-                {reactions.length > 0 && (
-                  <span className="reacts" aria-label="Reactions">
-                    {reactions.map((r, i) => <span key={i}>{r === "love" ? LOVE : ANGRY}</span>)}
-                  </span>
-                )}
-                {activeId === m.id && !m.viewOnce && (
-                  <div className="react-bar" role="group" aria-label="React">
-                    <button onClick={() => react(m, "love")} aria-pressed={m.reactions[me.id] === "love"} aria-label="Love">{LOVE}</button>
-                    <button onClick={() => react(m, "angry")} aria-pressed={m.reactions[me.id] === "angry"} aria-label="Angry">{ANGRY}</button>
-                  </div>
-                )}
+                  ) : (
+                    <span className="b__text">
+                      {payload === undefined ? <span className="muted">Unlocking…</span>
+                        : payload === null ? <span className="muted">Couldn&apos;t unlock this message</span>
+                        : payload.t === "text" ? payload.body : null}
+                    </span>
+                  )}
+                </MessageRow>
+              </div>
+            );
+          })}
+
+          {uploads.map((u) => (
+            <div key={u.id} className="row row--mine row--start">
+              <div className="b b--mine b--tail uploading">
+                Sending {u.label.toLowerCase()}… {u.pct}%
+                <span className="meter"><span style={{ width: `${u.pct}%` }} /></span>
               </div>
             </div>
-          );
-        })}
-
-        {uploads.map((u) => (
-          <div key={u.id} className="msg msg--mine">
-            <div className="bubble bubble--once uploading">
-              Sending {u.label.toLowerCase()}… {u.pct}%
-              <span className="meter"><span style={{ width: `${u.pct}%` }} /></span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {attachOpen && (
-        <div className="attach" role="menu">
-          <button role="menuitem" onClick={() => photoInput.current?.click()}>Photo</button>
-          <button role="menuitem" onClick={() => videoInput.current?.click()}>Video</button>
-          {!viewOnce && <button role="menuitem" onClick={() => fileInput.current?.click()}>File or document</button>}
+          ))}
         </div>
-      )}
 
-      {recording ? (
-        <VoiceRecorder onSend={onVoice} onCancel={() => setRecording(false)} onError={(msg) => { setRecording(false); setToast(msg); }} />
-      ) : (
-        <form className="composer" onSubmit={send}>
-          <button type="button" className="icon-btn" onClick={() => setAttachOpen((o) => !o)} aria-expanded={attachOpen} aria-label="Attach" disabled={!partner}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 6.5v10a4.5 4.5 0 0 1-9 0V5a3 3 0 0 1 6 0v10.5a1.5 1.5 0 0 1-3 0V6.5H9v9a3 3 0 0 0 6 0V5a4.5 4.5 0 0 0-9 0v11.5a6 6 0 0 0 12 0v-10z" /></svg>
+        {!atBottomUI && (
+          <button type="button" className="fab glass" style={{ bottom: bottomH + 14 }} onClick={scrollToBottom} aria-label="Jump to the latest messages">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16.5 5 9.5l1.4-1.4 5.6 5.6 5.6-5.6L19 9.5z" /></svg>
+            {newBelow > 0 && <span className="fab__count">{newBelow}</span>}
           </button>
-          <button type="button" className="icon-btn emoji-btn" onClick={() => setDraft((d) => d + LOVE)} aria-label="Add love">{LOVE}</button>
-          <button type="button" className="icon-btn emoji-btn" onClick={() => setDraft((d) => d + ANGRY)} aria-label="Add angry">{ANGRY}</button>
-          <label className="sr-only" htmlFor="draft">Message</label>
-          <textarea
-            id="draft"
-            ref={inputRef}
-            className="composer__input"
-            rows={1}
-            value={draft}
-            placeholder={viewOnce ? "Seen once, then gone" : disappear.value ? `Disappears after ${disappear.label}` : `Message ${partnerName}`}
-            onChange={(e) => setDraft(onlyLoveAndAngry(e.target.value))}
-            onKeyDown={onKeyDown}
-            disabled={!partner}
-            maxLength={8000}
-          />
-          <button
-            type="button"
-            className={viewOnce ? "icon-btn icon-btn--on" : "icon-btn"}
-            onClick={() => setViewOnce((v) => !v)}
-            aria-pressed={viewOnce}
-            aria-label="View once"
-            title="View once"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.6 11.4a1.3 1.3 0 0 0 0 1.2C2.7 14.6 6.5 19 12 19s9.3-4.4 10.4-6.4a1.3 1.3 0 0 0 0-1.2C21.3 9.4 17.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" /></svg>
-          </button>
-          {draft.trim() ? (
-            <button className="send" disabled={sending || !partner} aria-label="Send">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" /></svg>
-            </button>
-          ) : (
-            <button type="button" className="send" onClick={() => setRecording(true)} disabled={!partner} aria-label="Record a voice note">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15zm6-3.5a6 6 0 0 1-12 0H4.5a7.5 7.5 0 0 0 6.75 7.46V21h1.5v-2.04a7.5 7.5 0 0 0 6.75-7.46z" /></svg>
-            </button>
+        )}
+
+        <div className="pane__bottom" ref={bottomRef}>
+          {attachOpen && (
+            <div className="attach2 glass" role="menu">
+              <button role="menuitem" onClick={() => photoInput.current?.click()}><span className="attach2__dot attach2__dot--photo" />Photos</button>
+              <button role="menuitem" onClick={() => videoInput.current?.click()}><span className="attach2__dot attach2__dot--video" />Video</button>
+              {!viewOnce && <button role="menuitem" onClick={() => fileInput.current?.click()}><span className="attach2__dot attach2__dot--file" />Document</button>}
+              <button role="menuitem" onClick={() => { setAttachOpen(false); setStatusCompose(true); }}><span className="attach2__dot attach2__dot--status" />Status</button>
+            </div>
           )}
-        </form>
-      )}
+          {recording ? (
+            <VoiceRecorder onSend={onVoice} onCancel={() => setRecording(false)} onError={(msg) => { setRecording(false); setToast(msg); }} />
+          ) : (
+            <Composer
+              inputRef={inputRef}
+              draft={draft}
+              onDraft={onDraftChange}
+              onSubmit={send}
+              onKeyDown={onKeyDown}
+              placeholder={viewOnce ? "Seen once, then gone" : disappear.value ? `Disappears after ${disappear.label}` : "Message"}
+              disabled={!partner}
+              sending={sending}
+              viewOnce={viewOnce}
+              onToggleOnce={() => setViewOnce((v) => !v)}
+              onAttach={() => setAttachOpen((o) => !o)}
+              attachOpen={attachOpen}
+              onCamera={() => cameraInput.current?.click()}
+              onRecord={() => setRecording(true)}
+              onEmoji={(e) => setDraft((d) => d + e)}
+              reply={reply ? { name: nameOf(reply.from) === "You" ? "yourself" : nameOf(reply.from), preview: reply.preview } : null}
+              onCancelReply={() => setReply(null)}
+            />
+          )}
+        </div>
+      </section>
 
       <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={onPhotos} />
+      <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={onPhotos} />
       <input ref={videoInput} type="file" accept="video/*" hidden onChange={onVideo} />
       <input ref={fileInput} type="file" hidden onChange={onFile} />
       <input ref={avatarInput} type="file" accept="image/*" hidden onChange={onAvatar} />
       <input ref={backgroundInput} type="file" accept="image/*" hidden onChange={onBackground} />
+
+      {menuFor && (
+        <MessageMenu
+          rect={menuFor.rect}
+          mine={menuFor.m.senderId === me.id}
+          canReact={!menuFor.m.viewOnce}
+          canCopy={payloads.current.get(menuFor.m.id)?.t === "text" && !menuFor.m.viewOnce}
+          myReaction={menuFor.m.reactions[me.id] ?? null}
+          onReact={(r) => react(menuFor.m, r)}
+          onReply={() => startReply(menuFor.m)}
+          onCopy={() => copyMessage(menuFor.m)}
+          onClose={() => setMenuFor(null)}
+        />
+      )}
+
+      {moodOpen && partner && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="How you feel" onClick={() => setMoodOpen(false)}>
+          <div className="sheet-up glass" onClick={(e) => e.stopPropagation()}>
+            <MoodCard myName={me.name} partnerName={partnerName} guesses={guesses} current={myMood} onPick={pickMood}
+              onLater={() => { setMoodLater(true); setMoodOpen(false); }} />
+          </div>
+        </div>
+      )}
+
+      {statusCompose && (
+        <StatusComposer vault={vault} partnerName={partnerName} onClose={() => setStatusCompose(false)} onPosted={() => void syncNow()} onToast={setToast} />
+      )}
+      {statusView === "mine" && myStatuses.length > 0 && (
+        <StatusViewer items={myStatuses} ownerName={me.name} mine partnerName={partnerName} vault={vault}
+          onSeen={() => {}} onDelete={deleteStatus} onClose={() => setStatusView(null)} />
+      )}
+      {statusView === "theirs" && partner && theirStatuses.length > 0 && (
+        <StatusViewer items={theirStatuses} ownerName={partner.name} mine={false} partnerName={partnerName} vault={vault}
+          onSeen={markStatusSeen} onDelete={() => {}} onClose={() => setStatusView(null)} />
+      )}
 
       {once?.kind === "text" && (
         <div className="once" role="dialog" aria-modal="true" aria-label="View once message">
@@ -1201,26 +1310,12 @@ export default function ChatPage() {
         </div>
       )}
       {gamesOpen && (
-        <Games
-          vault={vault}
-          me={{ id: me.id, name: me.name }}
-          partner={partner ? { id: partner.id, name: partner.name } : null}
-          onClose={() => setGamesOpen(false)}
-          onToast={setToast}
-          onSendText={sendCard}
-          onChanged={() => void syncNow()}
-        />
+        <Games vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
+          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()} />
       )}
       {plannerOpen && (
-        <Planner
-          vault={vault}
-          me={{ id: me.id, name: me.name }}
-          partner={partner ? { id: partner.id, name: partner.name } : null}
-          today={today}
-          onClose={() => setPlannerOpen(false)}
-          onChanged={() => void syncNow()}
-          onToast={setToast}
-        />
+        <Planner vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
+          today={today} onClose={() => setPlannerOpen(false)} onChanged={() => void syncNow()} onToast={setToast} />
       )}
 
       {toast && <div className="toast" role="status">{toast}</div>}

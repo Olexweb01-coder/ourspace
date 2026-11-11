@@ -4,6 +4,7 @@ import { deleteBlobs } from "./media-server";
 /** Daily housekeeping: disappear expired messages, remove expired files, old sessions and invites. */
 export async function runCleanup(): Promise<{ filesRemoved: number }> {
   const sql = db();
+  await sql`delete from statuses where expires_at < now()`;
   await sql`update messages set deleted = true, iv = '', ciphertext = '', reactions = '{}'::jsonb, updated_at = now()
             where deleted = false and expires_at is not null and expires_at < now()`;
 

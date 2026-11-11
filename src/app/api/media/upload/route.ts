@@ -26,7 +26,7 @@ export async function POST(request: Request) {
         let purpose: MediaPurpose = "message";
         try {
           const p = JSON.parse(clientPayload || "{}").purpose;
-          if (p === "avatar" || p === "background" || p === "message") purpose = p;
+          if (p === "avatar" || p === "background" || p === "message" || p === "status") purpose = p;
         } catch { /* default */ }
 
         const sql = db();

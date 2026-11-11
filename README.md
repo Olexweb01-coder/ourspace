@@ -90,6 +90,14 @@ The shared password is typed once per phone. After that each of you can open the
 lock plus a secret the server releases for the right lock, 5 tries max, then the shared password is needed again.
 Setup: run `db/006_app_lock.sql` and `db/007_host_password.sql` once in Neon.
 
+## The chat screen
+WhatsApp's layout with Our Space's style: glass header and composer floating over a faint heart pattern, the side
+panel (status, feelings, plans, games, streak, settings) sliding in from the left on phones and fixed on computers.
+- Swipe right on a message to reply; long-press (or right-click) for love, angry, reply, copy; double-tap to love.
+- ✓ sent, gold ✓✓ once they've opened the app after it. "typing…" while they type. Jump-to-latest button with a count.
+- **Status:** words on a colour or a photo, only for the two of you, deleted after 24 hours (file included).
+Setup: run `db/008_status_typing.sql` once in Neon.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

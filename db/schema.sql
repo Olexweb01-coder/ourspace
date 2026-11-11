@@ -247,3 +247,13 @@ create table if not exists device_locks (
   last_used_at   timestamptz
 );
 create index if not exists device_locks_member_idx on device_locks(member_id);
+
+-- ===== Host password (same as db/007_host_password.sql) =====
+create table if not exists host_settings (
+  id             int primary key default 1 check (id = 1),   -- exactly one row
+  password_hash  text,                                        -- scrypt, never the password itself
+  failed         int not null default 0,
+  locked_until   timestamptz,
+  updated_at     timestamptz not null default now()
+);
+insert into host_settings (id) values (1) on conflict (id) do nothing;

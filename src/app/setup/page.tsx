@@ -10,14 +10,20 @@ import { initial } from "@/lib/format";
 import { personalizeInstall } from "@/lib/install";
 import { rememberSpace, setVault } from "@/lib/vault";
 
-type Mode = { mode: "host"; name: string; used: number; max: number } | { mode: "key" } | { mode: "signin" };
+type Mode =
+  | { mode: "host"; name: string; used: number; max: number }   // signed in as host: nothing extra
+  | { mode: "password" }                                          // ask for the host password
+  | { mode: "create" }                                            // very first space: choose a host password
+  | { mode: "settings" };                                         // spaces exist, no host password yet
 type Done = { spaceId: string; memberId: string; inviteUrl: string; expiresAt: string };
 
 export default function SetupPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode | null>(null);
-  const [useKey, setUseKey] = useState(false);
-  const [setupKey, setSetupKey] = useState("");
+  const [recover, setRecover] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [hostPassword, setHostPassword] = useState("");
+  const [hostConfirm, setHostConfirm] = useState("");
   const [hostName, setHostName] = useState("");
   const [label, setLabel] = useState("");
   const [password, setPassword] = useState("");
@@ -28,24 +34,28 @@ export default function SetupPage() {
 
   useEffect(() => {
     api<Mode>("/api/setup").then((m) => { setMode(m); if (m.mode === "host") setHostName(m.name); })
-      .catch(() => setMode({ mode: "signin" }));
+      .catch(() => setMode({ mode: "password" }));
   }, []);
 
   const asHost = mode?.mode === "host";
-  const showKey = !asHost && (mode?.mode === "key" || useKey);
+  // A new host password is chosen on the very first space, or when using the emergency reset.
+  const choosingHostPw = !asHost && (mode?.mode === "create" || recover);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (password.length < MIN_PASSWORD_LENGTH) return setError(`Use at least ${MIN_PASSWORD_LENGTH} characters. A short sentence only you two would say works best.`);
-    if (password !== confirm) return setError("The two passwords don't match.");
+    if (password !== confirm) return setError("The two shared passwords don't match.");
+    if (choosingHostPw && hostPassword !== hostConfirm) return setError("The two host passwords don't match.");
+    if (!asHost && hostPassword.length < 6) return setError("The host password is at least 6 characters.");
     setBusy(true);
     try {
       const salt = newSalt();
       const { encKey, authToken, master } = await deriveKeys(password, salt, KDF_ITERATIONS);
       const res = await api<Done>("/api/setup", {
         body: {
-          ...(showKey ? { setupKey } : {}), hostName, label, salt, iterations: KDF_ITERATIONS, authToken,
+          ...(asHost ? {} : { hostPassword }), ...(recover ? { recoveryKey } : {}),
+          hostName, label, salt, iterations: KDF_ITERATIONS, authToken,
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
       });
@@ -76,15 +86,15 @@ export default function SetupPage() {
     );
   }
 
-  // Not signed in as the host: no form at all.
-  if (mode.mode === "signin" && !useKey) {
+  // Spaces exist but no host password has been chosen yet: set it from inside the app first.
+  if (mode.mode === "settings" && !recover) {
     return (
       <main className="gate">
         <BondMark size={64} />
         <h1 className="gate__title">New space</h1>
-        <p className="gate__lead">Only the host can start a new space. Open your space on this phone first, then come back here.</p>
+        <p className="gate__lead">Choose your host password first: open your space, then Settings, then Host password. After that you can start a space from any phone with it.</p>
         <button className="btn btn--wide" onClick={() => router.push("/")}>Open my space</button>
-        <button type="button" className="quiet-link link-btn--quiet" onClick={() => setUseKey(true)}>Use setup key</button>
+        <button type="button" className="quiet-link link-btn--quiet" onClick={() => setRecover(true)}>Emergency reset</button>
       </main>
     );
   }
@@ -96,13 +106,29 @@ export default function SetupPage() {
       <p className="gate__lead">
         {asHost
           ? `Signed in as ${hostName}. ${mode.mode === "host" ? `${mode.used} of ${mode.max} spaces used. ` : ""}The password locks everything and nobody can reset it, so pick one you'll both remember.`
-          : "The password locks everything. It never leaves your phone, and nobody can reset it."}
+          : recover
+            ? "Emergency reset: enter the key from Vercel and choose a new host password."
+            : "The shared password locks everything. It never leaves your phone, and nobody can reset it."}
       </p>
       <form className="gate__form" onSubmit={submit}>
-        {showKey && (
+        {recover && (
           <>
-            <label className="label" htmlFor="k">Setup key</label>
-            <input id="k" className="field" type="password" value={setupKey} onChange={(e) => setSetupKey(e.target.value)} autoComplete="off" required />
+            <label className="label" htmlFor="rk">Emergency key (HOST_SETUP_KEY from Vercel)</label>
+            <input id="rk" className="field" type="password" value={recoveryKey} onChange={(e) => setRecoveryKey(e.target.value)} autoComplete="off" required />
+          </>
+        )}
+        {!asHost && (
+          <>
+            <label className="label" htmlFor="hp">{choosingHostPw ? "Choose a host password" : "Host password"}</label>
+            <input id="hp" className="field" type="password" value={hostPassword} onChange={(e) => setHostPassword(e.target.value)}
+              autoComplete={choosingHostPw ? "new-password" : "current-password"} required autoFocus />
+            {choosingHostPw && (
+              <>
+                <label className="label" htmlFor="hp2">Type the host password again</label>
+                <input id="hp2" className="field" type="password" value={hostConfirm} onChange={(e) => setHostConfirm(e.target.value)} autoComplete="new-password" required />
+                <p className="hint">Only for starting new spaces. Make it different from any shared password.</p>
+              </>
+            )}
           </>
         )}
         {!asHost && (
@@ -120,6 +146,9 @@ export default function SetupPage() {
         <button className="btn btn--wide" disabled={busy}>{busy ? "Locking it up…" : "Create our space"}</button>
         {error && <p className="error" role="alert">{error}</p>}
       </form>
+      {mode.mode === "password" && !recover && (
+        <button type="button" className="quiet-link link-btn--quiet" onClick={() => { setRecover(true); setError(null); }}>Forgot your host password?</button>
+      )}
     </main>
   );
 }

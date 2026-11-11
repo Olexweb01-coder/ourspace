@@ -7,6 +7,7 @@ import InviteBox from "@/components/InviteBox";
 import MediaBubble, { type MediaState } from "@/components/MediaBubble";
 import MediaViewer from "@/components/MediaViewer";
 import Games from "@/components/Games";
+import HostPasswordForm from "@/components/HostPasswordForm";
 import LockSetup from "@/components/LockSetup";
 import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
@@ -914,6 +915,13 @@ export default function ChatPage() {
               <p className="sheet__title">Another space</p>
               <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
               <p className="hint">A completely separate space with its own password. No setup key needed.</p>
+            </div>
+          )}
+
+          {me.role === "host" && (
+            <div className="sheet__group">
+              <p className="sheet__title">Host password</p>
+              <HostPasswordForm onToast={setToast} />
             </div>
           )}
 

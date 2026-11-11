@@ -183,6 +183,7 @@ export default function ChatPage() {
   };
   const [aboutOpen, setAboutOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
+  const [loadTrouble, setLoadTrouble] = useState<{ count: number; server: boolean }>({ count: 0, server: false });
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [activeCall, setActiveCall] = useState<{ id: string; role: "caller" | "callee"; kind: "voice" | "video" } | null>(null);
   const handledCalls = useRef(new Set<string>());
@@ -340,6 +341,7 @@ export default function ChatPage() {
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
       setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [], live: data.live ?? null });
+      setLoadTrouble((t) => (t.count ? { count: 0, server: false } : t));
       if (data.calls) {
         setCalls((prev) => (JSON.stringify(prev) === JSON.stringify(data.calls) ? prev : data.calls!));
         // Someone is calling you: ring (each call only once on this phone).
@@ -359,6 +361,10 @@ export default function ChatPage() {
         await decryptList(data.messages);
       }
     } catch (err) {
+      // Keep trying quietly; after a few misses, say what's going on instead of showing a blank screen.
+      if (!(err instanceof ApiError && err.status === 401)) {
+        setLoadTrouble((t) => ({ count: t.count + 1, server: err instanceof ApiError && err.status >= 500 }));
+      }
       if (err instanceof ApiError && err.status === 401) {
         // The server connection expired (or "Lock now" was used): renew it quietly with the key already in memory.
         const r = await reconnect();
@@ -1064,7 +1070,22 @@ export default function ChatPage() {
   }
 
   // ---------- render ----------
-  if (!ready || !info || !me) return <main className="gate" aria-busy="true" />;
+  if (!ready || !info || !me) {
+    return (
+      <main className="gate" aria-busy="true">
+        <span className="live__pulse" aria-hidden="true" />
+        {loadTrouble.count >= 3 && (
+          <>
+            <p className="gate__lead">{loadTrouble.server ? "Our Space can't load right now. Still trying…" : "Waiting for the network. Still trying…"}</p>
+            <p className="hint">{loadTrouble.server
+              ? "The server had a problem. If it keeps happening, its database may need the latest update."
+              : "Check your connection. Your messages will appear as soon as it's back."}</p>
+            <button type="button" className="btn btn--ghost" onClick={() => { setLoadTrouble({ count: 0, server: false }); void syncNow(); }}>Try again</button>
+          </>
+        )}
+      </main>
+    );
+  }
   const vault = vaultRef.current as Vault;
 
   const online = isOnline(partner?.lastSeenAt ?? null);

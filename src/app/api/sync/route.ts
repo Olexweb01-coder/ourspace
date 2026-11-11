@@ -58,9 +58,12 @@ export async function GET(req: Request) {
         where space_id = ${me.spaceId} and day >= current_date - 8 order by day`,
     sql`select id, kind, about_member, month, day, start_year, iv, ciphertext from special_days where space_id = ${me.spaceId}`,
     sql`select member_id, iv, ciphertext from cycles where space_id = ${me.spaceId}`,
+    sql`select g.id, g.kind, g.created_by from games g
+        where g.space_id = ${me.spaceId} and g.finished_at is null
+          and not exists (select 1 from game_answers a where a.game_id = g.id and a.member_id = ${me.memberId})`,
   ]);
 
-  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles] = results;
+  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting] = results;
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
   const st = computeStreak(completeDays, today);
@@ -91,6 +94,7 @@ export async function GET(req: Request) {
       sentToday: todayRows[0].sent_today as string[],
     },
     specialDays: specialDays.map((d) => ({ id: d.id, kind: d.kind, aboutMember: d.about_member, month: d.month, day: d.day, startYear: d.start_year, iv: d.iv, ct: d.ciphertext })),
+    gamesWaiting: gamesWaiting.map((g) => ({ id: g.id, kind: g.kind, createdBy: g.created_by })),
     cycles: cycles.map((c) => ({ memberId: c.member_id, iv: c.iv, ct: c.ciphertext })),
     moods: moods.map((m) => ({ memberId: m.member_id, day: m.day, iv: m.iv, ct: m.ciphertext, updatedAt: m.updated_at })),
     messages: messages.map((r) => ({

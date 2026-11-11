@@ -6,6 +6,7 @@ import Celebration, { streakLine } from "@/components/Celebration";
 import InviteBox from "@/components/InviteBox";
 import MediaBubble, { type MediaState } from "@/components/MediaBubble";
 import MediaViewer from "@/components/MediaViewer";
+import Games from "@/components/Games";
 import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
 import StreakSheet from "@/components/StreakSheet";
@@ -43,8 +44,10 @@ type Streak = { today: string; current: number; best: number; todayDone: boolean
 type SpecialRow = { id: string; kind: DayKind; aboutMember: string | null; month: number; day: number; startYear: number | null; iv: string; ct: string };
 type Special = Omit<SpecialRow, "iv" | "ct"> & { title: string };
 type CycleRow = { memberId: string; iv: string; ct: string };
+type WaitingGame = { id: string; kind: "wyr" | "tot" | "know"; createdBy: string };
 type SyncResponse = {
   now: string;
+  gamesWaiting: WaitingGame[];
   specialDays: SpecialRow[];
   cycles: CycleRow[];
   streak: Streak;
@@ -120,6 +123,7 @@ export default function ChatPage() {
   const [cycleMap, setCycleMap] = useState<Record<string, CycleData>>({});
   const plainCache = useRef(new Map<string, unknown>());
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [gamesOpen, setGamesOpen] = useState(false);
   const prevDone = useRef<boolean | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -227,7 +231,7 @@ export default function ChatPage() {
       const q = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
-      setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak });
+      setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [] });
       void decryptMoods(data.moods ?? []);
       void decryptPlans(data.specialDays ?? [], data.cycles ?? []);
       if (data.messages.length) {
@@ -406,10 +410,10 @@ export default function ChatPage() {
     atBottom.current = true;
   }
 
-  async function postMessage(payload: Payload, mediaId?: string) {
+  async function postMessage(payload: Payload, mediaId?: string, once: boolean = viewOnce) {
     const v = vaultRef.current;
     if (!v) throw new Error("locked");
-    const sentOnce = viewOnce;
+    const sentOnce = once;
     const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
     const res = await api<{ id: string; createdAt: string; expiresAt: string | null; mediaExpiresAt: string | null }>("/api/messages", {
       body: { iv, ct, viewOnce: sentOnce, kind: payload.t, mediaId },
@@ -514,6 +518,17 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) {
       e.preventDefault();
       void send();
+    }
+  }
+
+  async function sendCard(text: string): Promise<boolean> {
+    try {
+      await postMessage({ t: "text", body: text }, undefined, false);
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { lockOut(); return false; }
+      setToast(err instanceof ApiError ? err.message : "Not sent. Check your connection.");
+      return false;
     }
   }
 
@@ -778,21 +793,23 @@ export default function ChatPage() {
           title={`${me.name} and ${partnerName}`}
         />
         <div className="chat__who">
-          <div className="chat__nameRow">
-            <h1 className="chat__name">{partnerName}</h1>
-            {partner && (
+          <h1 className="chat__name">{partnerName}</h1>
+          <p className={online ? "chat__status chat__status--live" : "chat__status"}>
+              {partner && (
               <button type="button" className={st.todayDone ? "streak-pill streak-pill--done" : "streak-pill"} onClick={() => setStreakOpen(true)}
                 aria-label={`${st.current} day streak. Open streak details`}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>
                 {st.current}
               </button>
             )}
-          </div>
-          <p className={online ? "chat__status chat__status--live" : "chat__status"}>
             {partner ? sinceLabel(partner.lastSeenAt) : "hasn't joined yet"}
             {partner?.notifications === "off" && <span className="pill">notifications off</span>}
           </p>
         </div>
+        <button className="icon-btn" onClick={() => setGamesOpen(true)} aria-label="Games">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>
+          {(info.gamesWaiting?.length ?? 0) > 0 && <span className="dot-badge" aria-label="A game is waiting for you" />}
+        </button>
         <button className="icon-btn" onClick={() => setPlannerOpen(true)} aria-label="Special days, cycle, goals and things to talk about">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>
         </button>
@@ -927,6 +944,11 @@ export default function ChatPage() {
           onPick={pickMood}
           onLater={() => { setMoodLater(true); setMoodOpen(false); }}
         />
+      )}
+      {info.gamesWaiting?.length > 0 && partner && info.gamesWaiting.some((g) => g.createdBy !== me.id) && (
+        <button type="button" className="banner banner--warm" onClick={() => setGamesOpen(true)}>
+          {partner.name} started a game. Your turn to play.
+        </button>
       )}
       {upcomingText && (
         <button type="button" className="banner banner--gold" onClick={() => setPlannerOpen(true)}>{upcomingText}</button>
@@ -1130,6 +1152,17 @@ export default function ChatPage() {
         <StreakSheet current={st.current} best={st.best} todayDone={st.todayDone} iSent={iSentToday} partnerName={partnerName} onClose={() => setStreakOpen(false)} />
       )}
       {celebrate !== null && <Celebration {...celebrate} onClose={() => setCelebrate(null)} />}
+      {gamesOpen && (
+        <Games
+          vault={vault}
+          me={{ id: me.id, name: me.name }}
+          partner={partner ? { id: partner.id, name: partner.name } : null}
+          onClose={() => setGamesOpen(false)}
+          onToast={setToast}
+          onSendText={sendCard}
+          onChanged={() => void syncNow()}
+        />
+      )}
       {plannerOpen && (
         <Planner
           vault={vault}

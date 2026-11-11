@@ -67,6 +67,16 @@ It never sends anything twice.
 
 Setup: run `db/004_planner.sql` once in Neon.
 
+## Games (Phase 5): free, built in, no AI
+Open the dice button in the chat header.
+- **Would you rather**, **This or that** and **How well do you know me**: each of you answers privately, then
+  you see each other's picks and a score. Answers are encrypted and final, and the server won't send your
+  partner's answers until you've submitted yours, so nobody can peek.
+- **Cards:** Truth, Dare and Deep talk. Draw one and send it into the chat.
+- 205 original questions and cards live in `src/lib/games-bank.ts`. Add your own any time.
+
+Setup: run `db/005_games.sql` once in Neon.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

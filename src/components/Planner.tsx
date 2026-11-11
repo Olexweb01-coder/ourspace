@@ -447,7 +447,7 @@ function TalkTab({ data, me, partner, today, busy, act, seal }: TabProps) {
               <span className="pitem__main">
                 <strong>{t.text}</strong>
                 <span className="hint">
-                  {t.createdBy === me.id ? "You added this" : `${partner?.name ?? "They"} added this`}
+                  {t.createdBy === me.id ? "You added this" : `${partner?.name ?? "Your partner"} added this`}
                   {t.remindAt ? ` · reminder ${t.remindedAt ? "sent" : whenLabel(t.remindAt)}${t.remindBoth ? " for both" : ""}` : ""}
                 </span>
               </span>

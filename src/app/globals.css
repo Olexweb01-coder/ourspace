@@ -1117,3 +1117,20 @@ button.notice { cursor: pointer; }
 .live > :not(.live__board):not(.whot3d) { margin-left: 12px; margin-right: 12px; }
 .live__head { width: calc(100% - 24px); }
 .live__board { max-width: 100%; }
+
+/* ---------- layers: one scale for the whole app ----------
+   chat 0-6 · pages (Us planned, Play together) 8 · sheets 9 · side panel 19-20 · live games 22
+   · statuses 25 · message menu 30 · full-screen moments (celebration, photo viewer, view once) 40 · toasts 60.
+   On a computer the side panel stays open, so pages and sheets open in the chat area beside it. */
+.celebrate, .viewer, .once { z-index: 40; }
+.toast { z-index: 60; }
+@media (min-width: 960px) {
+  .planner, .modal { left: 360px; }
+  .live .modal { left: 0; }          /* sheets inside a live game cover the game itself */
+  .toast { left: calc(50% + 180px); } /* centred in the chat area, not across the panel */
+}
+@media (min-width: 960px) {
+  /* Pages fill the whole chat area (no chat peeking out at the sides); the content stays a readable width. */
+  .planner { max-width: none; margin: 0; }
+  .planner > * { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
+}

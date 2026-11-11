@@ -23,6 +23,7 @@ type Props = {
   onSendText: (text: string) => Promise<boolean>;
   onChanged: () => void;
   onLive: (kind: "ludo" | "whot") => void;
+  partnerLabel: string;   // what you call them; used before they've joined
 };
 
 type Row = {
@@ -50,7 +51,10 @@ function savePlayed(spaceId: string, ids: Iterable<string>) {
 }
 const answerAad = (spaceId: string, id: string, memberId: string) => `answer:${spaceId}:${id}:${memberId}`;
 
-export default function Games({ vault, me, partner, onClose, onToast, onSendText, onChanged, onLive }: Props) {
+export default function Games({ vault, me, partner: joined, partnerLabel, onClose, onToast, onSendText, onChanged, onLive }: Props) {
+  // Before they join, speak of them by name anyway; buttons that need them stay off (see `joined`).
+  const partner = joined ?? null;
+  const theirName = joined?.name ?? partnerLabel;
   const [games, setGames] = useState<Game[] | null>(null);
   const [view, setView] = useState<View>({ screen: "home" });
   const [busy, setBusy] = useState(false);
@@ -121,7 +125,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
       await load();
       onChanged();
       setView(game.partnerAnswered ? { screen: "results", id: game.id } : { screen: "home" });
-      if (!game.partnerAnswered) onToast(`Sent. ${partner?.name ?? "They"} will be told it's their turn.`);
+      if (!game.partnerAnswered) onToast(`Sent. ${theirName} will be told it's their turn.`);
     } catch (err) {
       onToast(err instanceof ApiError ? err.message : "Couldn't send your answers. Try again.");
     } finally {
@@ -142,7 +146,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
   }
 
   const find = (id: string) => games?.find((g) => g.id === id) ?? null;
-  const nameOf = (id: string | null) => (id === me.id ? me.name : partner?.name ?? "");
+  const nameOf = (id: string | null) => (id === me.id ? me.name : theirName);
   const title = view.screen === "deck" ? DECKS[view.deck].title
     : view.screen === "home" ? "Play together"
     : GAME_INFO[find(view.id)?.kind ?? "wyr"].title;
@@ -157,7 +161,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
       </header>
       <div className="planner__body">
         {!games ? <p className="hint">Setting up the games…</p>
-          : view.screen === "home" ? <Home games={games} me={me} partner={partner} busy={busy} start={start} onLive={onLive} debts={debts} settle={settle} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
+          : view.screen === "home" ? <Home games={games} me={me} partner={partner} theirName={theirName} busy={busy} start={start} onLive={onLive} debts={debts} settle={settle} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
           : view.screen === "play" && find(view.id) ? <Play key={view.id} game={find(view.id)!} me={me} partner={partner} busy={busy} submit={submit} nameOf={nameOf} />
           : view.screen === "results" && find(view.id) ? <Results game={find(view.id)!} me={me} partner={partner} nameOf={nameOf} remove={remove} />
           : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onToast={onToast} />
@@ -172,15 +176,15 @@ function scoreOf(g: Game): number {
   return g.questions.reduce((n, _, i) => n + (g.mine![i] === g.theirs![i] ? 1 : 0), 0);
 }
 
-function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive, debts, settle }: {
-  games: Game[]; me: Person; partner: Person | null; busy: boolean; onLive: (k: "ludo" | "whot") => void;
+function Home({ games, me, partner, theirName, busy, start, open, deck, nameOf, onLive, debts, settle }: {
+  games: Game[]; me: Person; partner: Person | null; theirName: string; busy: boolean; onLive: (k: "ludo" | "whot") => void;
   debts: Debt[]; settle: (d: Debt, a: "paid" | "forgive") => void;
   start: (k: GameKind) => void; open: (g: Game) => void; deck: (d: DeckKind) => void; nameOf: (id: string | null) => string;
 }) {
   const yourTurn = games.filter((g) => !g.mine);
   const waiting = games.filter((g) => g.mine && !g.partnerAnswered && !g.finishedAt);
   const done = games.filter((g) => g.mine && g.theirs).slice(0, 12);
-  const pname = partner?.name ?? "them";
+  const pname = theirName;
   return (
     <>
       {yourTurn.length > 0 && (
@@ -216,7 +220,7 @@ function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive, deb
             <strong>Whot</strong><span>Naija rules</span>
           </button>
         </div>
-        <p className="hint">Live games only move while you&apos;re both here. {partner ? `${partner.name} gets a notification to join.` : ""}</p>
+        <p className="hint">{partner ? `Live games only move while you're both here. ${partner.name} gets a notification to join.` : `These open once ${theirName} joins. Send the invite link from Settings.`}</p>
       </section>
 
       {debts.length > 0 && (
@@ -227,7 +231,7 @@ function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive, deb
             return (
               <div key={d.id} className={d.paidAt ? "debt debt--paid" : owedToMe ? "debt debt--mine" : "debt"}>
                 <span className="debt__text">
-                  <small>{owedToMe ? `${partner?.name ?? "They"} owe${partner ? "s" : ""} you` : `You owe ${partner?.name ?? "them"}`} · {d.kind === "ludo" ? "Ludo" : "Whot"}</small>
+                  <small>{owedToMe ? `${theirName} owes you` : `You owe ${theirName}`} · {d.kind === "ludo" ? "Ludo" : "Whot"}</small>
                   <strong>{d.text}</strong>
                 </span>
                 {d.paidAt ? <span className="debt__paid">Paid</span>
@@ -333,7 +337,7 @@ function Results({ game, me, partner, nameOf, remove }: {
   const total = game.questions.length;
   const subjectName = nameOf(game.subject);
   const iAmSubject = game.subject === me.id;
-  const pname = partner?.name ?? "Them";
+  const pname = partner?.name ?? "Your partner";
   const headline = game.kind === "know"
     ? iAmSubject ? `${pname} knows you ${score} of ${total}` : `You know ${subjectName} ${score} of ${total}`
     : `You matched ${score} of ${total}`;
@@ -405,7 +409,7 @@ function Deck({ deck, spaceId, partner, onSendText, onToast }: {
         <p className="card__text">{d.cards[card]}</p>
       </div>
       <div className="row row--center">
-        <button type="button" className="btn" disabled={sending || !partner} onClick={send}>{sending ? "Sending…" : `Send to ${partner?.name ?? "them"}`}</button>
+        <button type="button" className="btn" disabled={sending || !partner} onClick={send}>{sending ? "Sending…" : `Send to ${partner?.name ?? "your partner"}`}</button>
         <button type="button" className="btn btn--ghost" onClick={() => setCard(drawCard(deck, seen))}>Another one</button>
       </div>
       <p className="hint">{seen.size} of {d.cards.length} seen</p>

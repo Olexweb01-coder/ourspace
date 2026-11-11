@@ -118,6 +118,11 @@ Setup: run `db/009_about_live.sql` once in Neon.
   mark it Paid or Let go.
 Setup: run `db/010_game_settings_bets.sql` once in Neon.
 
+## Layers and computer layout
+On a computer (960px and wider) the side panel stays open, so pages and sheets open in the chat area beside it and
+only one page is open at a time. Full-screen moments (celebrations, photo viewer, view once, statuses, live games)
+cover the whole window. The layer order is written once at the end of `globals.css`.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

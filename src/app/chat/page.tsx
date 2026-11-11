@@ -165,6 +165,11 @@ export default function ChatPage() {
   const [topH, setTopH] = useState(120);
   const [bottomH, setBottomH] = useState(72);
   const [liveOpen, setLiveOpen] = useState<{ kind: "ludo" | "whot"; id?: string } | null>(null);
+  // One page at a time: opening one closes the others (on a computer the side panel stays open, so this matters).
+  const openOnly = (page: "mood" | "planner" | "games" | "streak" | "about") => {
+    setMoodOpen(page === "mood"); setPlannerOpen(page === "planner"); setGamesOpen(page === "games");
+    setStreakOpen(page === "streak"); setAboutOpen(page === "about"); setDrawerOpen(false);
+  };
   const [aboutOpen, setAboutOpen] = useState(false);
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
@@ -681,7 +686,7 @@ export default function ChatPage() {
       const now = new Date().toISOString();
       setMoods((prev) => [...prev.filter((m) => !(m.memberId === v.memberId && m.day === day)), { memberId: v.memberId, day, key, updatedAt: now }]);
       setMoodOpen(false);
-      setToast(`${partner?.name ?? "They"} will see you feel ${moodOf(key)?.label.toLowerCase()} today`);
+      setToast(`${partner?.name ?? info?.space.label ?? "Your partner"} will see you feel ${moodOf(key)?.label.toLowerCase()} today`);
     } catch (err) {
       setToast(err instanceof ApiError ? err.message : "Couldn't save that. Try again.");
     }
@@ -939,10 +944,10 @@ export default function ChatPage() {
   type Notice = { key: string; text: string; tone?: "gold" | "care" | "warm" | "warn"; onClick?: () => void };
   const notices: Notice[] = [];
   if (partnerMood && partner) notices.push({ key: "pm", text: `${partner.name} feels ${partnerMood.label.toLowerCase()}. ${partnerMood.hint(partner.name)}`, tone: "warm" });
-  if (partner && !myMood) notices.push({ key: "mm", text: "How are you feeling today?", tone: "gold", onClick: () => setMoodOpen(true) });
-  if (streakAtRisk) notices.push({ key: "sr", text: iSentToday ? `Waiting on ${partnerName}. ${st.current}-day streak ends at midnight.` : `Your ${st.current}-day streak ends at midnight.`, tone: "warn", onClick: () => setStreakOpen(true) });
-  if (gamesWaiting && partner) notices.push({ key: "gw", text: `${partner.name} started a game. Your turn.`, tone: "gold", onClick: () => setGamesOpen(true) });
-  if (upcomingText) notices.push({ key: "up", text: upcomingText, tone: "gold", onClick: () => setPlannerOpen(true) });
+  if (partner && !myMood) notices.push({ key: "mm", text: "How are you feeling today?", tone: "gold", onClick: () => openOnly("mood") });
+  if (streakAtRisk) notices.push({ key: "sr", text: iSentToday ? `Waiting on ${partnerName}. ${st.current}-day streak ends at midnight.` : `Your ${st.current}-day streak ends at midnight.`, tone: "warn", onClick: () => openOnly("streak") });
+  if (gamesWaiting && partner) notices.push({ key: "gw", text: `${partner.name} started a game. Your turn.`, tone: "gold", onClick: () => openOnly("games") });
+  if (upcomingText) notices.push({ key: "up", text: upcomingText, tone: "gold", onClick: () => openOnly("planner") });
   if (live && !liveOpen) {
     if (live.status === "lobby" && live.createdBy !== me.id) notices.push({ key: "live", text: `${partnerName} is waiting at the ${live.kind === "ludo" ? "Ludo" : "Whot"} table. Join now`, tone: "gold", onClick: () => setLiveOpen({ kind: live.kind, id: live.id }) });
     else if (live.status === "playing") notices.push({ key: "live", text: `Your ${live.kind === "ludo" ? "Ludo" : "Whot"} game is waiting. Back to the table`, tone: "gold", onClick: () => setLiveOpen({ kind: live.kind, id: live.id }) });
@@ -1012,13 +1017,13 @@ export default function ChatPage() {
         </div>
 
         <div className="dsec">
-          <DrawerItem label="Feelings today" hint={myMood ? `You: ${moodOf(myMood)?.label}` : "Share how you feel"} onClick={() => { setDrawerOpen(false); setMoodOpen(true); }}
+          <DrawerItem label="Feelings today" hint={myMood ? `You: ${moodOf(myMood)?.label}` : "Share how you feel"} onClick={() => openOnly("mood")}
             icon={<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18z" /></svg>} />
-          <DrawerItem label="Us, planned" hint="Special days, cycle, goals, talk" onClick={() => { setDrawerOpen(false); setPlannerOpen(true); }}
+          <DrawerItem label="Us, planned" hint="Special days, cycle, goals, talk" onClick={() => openOnly("planner")}
             icon={<svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>} />
-          <DrawerItem label="Play together" hint={gamesWaiting ? "A game is waiting for you" : "Games and cards"} badge={gamesWaiting} onClick={() => { setDrawerOpen(false); setGamesOpen(true); }}
+          <DrawerItem label="Play together" hint={gamesWaiting ? "A game is waiting for you" : "Games and cards"} badge={gamesWaiting} onClick={() => openOnly("games")}
             icon={<svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>} />
-          <DrawerItem label="Our streak" hint={`${st.current} now · longest ${st.best}`} onClick={() => { setDrawerOpen(false); setStreakOpen(true); }}
+          <DrawerItem label="Our streak" hint={`${st.current} now · longest ${st.best}`} onClick={() => openOnly("streak")}
             icon={<svg viewBox="0 0 24 24"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>} />
           <DrawerItem label="Settings" hint="Photo, theme, lock, storage and more" onClick={() => setMenuOpen((o) => !o)}
             icon={<svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)" /></svg>} />
@@ -1029,7 +1034,7 @@ export default function ChatPage() {
             <div className="sheet__group">
               <p className="sheet__title">About you</p>
               <p className="hint">{myGender ? `${myGender === "woman" ? "Woman" : "Man"}` : "Not set"}{birthdayOf(me.id) ? ` · birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}</p>
-              <button className="btn btn--ghost" onClick={() => { setDrawerOpen(false); setAboutOpen(true); }}>Edit</button>
+              <button className="btn btn--ghost" onClick={() => openOnly("about")}>Edit</button>
             </div>
             <div className="sheet__group">
               <p className="sheet__title">Your photo</p>
@@ -1079,7 +1084,7 @@ export default function ChatPage() {
               <p className="sheet__title">App lock on this phone</p>
               <p className="hint">{lockKind ? `Opens with your ${LOCK_LABEL[lockKind].toLowerCase()}.` : "Off. You type the shared password each time."}</p>
               <div className="row">
-                <button className="btn btn--ghost" onClick={() => setLockSetupOpen(true)}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
+                <button className="btn btn--ghost" onClick={() => { setDrawerOpen(false); setLockSetupOpen(true); }}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
                 {lockKind && <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
               </div>
             </div>
@@ -1126,7 +1131,7 @@ export default function ChatPage() {
             streak={partner ? { count: st.current, done: st.todayDone } : null}
             onMenu={() => setDrawerOpen(true)}
             onWho={() => (theirUnseen ? setStatusView("theirs") : setDrawerOpen(true))}
-            onStreak={() => setStreakOpen(true)}
+            onStreak={() => openOnly("streak")}
             onNudge={partner ? nudge : null}
             nudgeLabel={`Nudge ${partnerName}`}
           />
@@ -1355,6 +1360,7 @@ export default function ChatPage() {
       {gamesOpen && (
         <Games vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
           onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()}
+          partnerLabel={partnerName}
           onLive={(kind) => { setGamesOpen(false); setLiveOpen({ kind, id: live && live.kind === kind ? live.id : undefined }); }} />
       )}
       {plannerOpen && (

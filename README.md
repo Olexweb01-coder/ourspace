@@ -118,15 +118,19 @@ Setup: run `db/009_about_live.sql` once in Neon.
   mark it Paid or Let go.
 Setup: run `db/010_game_settings_bets.sql` once in Neon.
 
-## Signing in from any phone
+## Signing in from any phone, and switching spaces
 love.olexweb.com shows three doors on a phone that doesn't know a space yet:
-- **I'm their partner:** your name (or the name the host calls you) + the shared password.
-- **I'm the host:** host password -> pick a space -> its shared password. ("Sign in with my name instead" if no host password yet.)
+- **I'm the host:** host password + shared password (the shared password picks which space opens).
+- **I'm the partner:** just the shared password.
 - **Start a new space:** the setup screen (host password required).
-A phone that already knows a space opens straight to the PIN/password, with "Sign in another way".
-The shared password is never sent: `/api/auth/find` and `/api/auth/host` return only the salt, and `/api/auth/login`
-checks the proof as before (10 wrong tries locks the space for 15 minutes; host password: 5 tries).
-Settings is its own page (not inside the side panel).
+How it stays private: `/api/auth/doors` always returns exactly 5 salts (real ones plus fixed decoys, sorted, no names),
+the phone derives one proof per door, and `/api/auth/open` signs in to whichever space matches. Nobody can tell how many
+spaces exist. Wrong tries count per network (10 then a 15-minute pause), never against a couple's space.
+A phone opens to its last-used space; it forgets spaces that no longer exist.
+**Switching (host):** tap the names at the top of the side panel, pick a space, type its shared password.
+The switch goes through `/hop` so the chat starts fresh; nothing carries over between spaces.
+Partners never see the switcher. Settings is its own page.
+Setup: run `db/011_sign_in_guard.sql` once in Neon.
 
 ## Layers and computer layout
 On a computer (960px and wider) the side panel stays open, so pages and sheets open in the chat area beside it and

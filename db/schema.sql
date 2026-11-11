@@ -345,3 +345,11 @@ create table if not exists love_debts (
   paid_at     timestamptz
 );
 create index if not exists love_debts_space_idx on love_debts(space_id, created_at desc);
+
+-- ===== Sign-in guard (same as db/011_sign_in_guard.sql) =====
+create table if not exists auth_throttle (
+  key           text primary key,              -- a one-way hash of the network address, never the address itself
+  failures      int not null default 0,
+  locked_until  timestamptz,
+  updated_at    timestamptz not null default now()
+);

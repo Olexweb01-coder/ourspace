@@ -11,7 +11,7 @@ import { APP_NAME } from "@/lib/brand";
 import { deriveKeys, type DerivedKeys } from "@/lib/crypto-client";
 import { initial } from "@/lib/format";
 import { personalizeInstall } from "@/lib/install";
-import { rememberSpace, savedSpaces, setVault, type SavedSpace, type Vault } from "@/lib/vault";
+import { forgetSpace, rememberSpace, savedSpaces, setVault, type SavedSpace, type Vault } from "@/lib/vault";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -49,13 +49,30 @@ export default function UnlockPage() {
     }
     setSpaces(list);
     choose(list.find((x) => x.spaceId === s) ?? list[0] ?? null);
+    if (params.get("another") === "1") setAnother(true);
+    // Forget spaces this phone remembers that no longer exist (e.g. after a reset), so nothing stale shows.
+    void Promise.all(list.map(async (x) => {
+      try { await api(`/api/auth/salt?spaceId=${x.spaceId}`); return true; }
+      catch (err) { if (err instanceof ApiError && err.status === 404) { forgetSpace(x.spaceId); return false; } return true; }
+    })).then((alive) => {
+      if (alive.every(Boolean)) return;
+      const left = savedSpaces();
+      setSpaces(left);
+      choose(left.find((x) => x.spaceId === s) ?? left[0] ?? null);
+    });
   }, []);
 
   async function finish(keys: DerivedKeys, s: SavedSpace, viaPassword: boolean) {
     const res = await api<{ name: string; label: string }>("/api/auth/login", {
       body: { spaceId: s.spaceId, memberId: s.memberId, authToken: keys.authToken, tz: tz() },
     });
-    rememberSpace({ ...s, label: res.label, myName: res.name });
+    opened(keys, { ...s, label: res.label, myName: res.name }, viaPassword);
+  }
+
+  // A space is open (the server session exists): remember it, keep the key in memory, maybe offer a quicker lock.
+  function opened(keys: DerivedKeys, s: SavedSpace, viaPassword: boolean) {
+    const res = { name: s.myName, label: s.label };
+    rememberSpace(s);
     const vault: Vault = { encKey: keys.encKey, master: keys.master, spaceId: s.spaceId, memberId: s.memberId };
     setVault(vault);
     setPassword("");
@@ -113,7 +130,7 @@ export default function UnlockPage() {
 
   // A phone that doesn't know a space yet (or "Sign in another way"): host, partner, or start a new space.
   if (!current || another) {
-    return <SignIn attempt={(keys, sp) => finish(keys, sp, true)} onBack={current ? () => setAnother(false) : undefined} />;
+    return <SignIn onOpened={(keys, sp) => opened(keys, sp, true)} onBack={current ? () => setAnother(false) : undefined} />;
   }
 
   const lock = getLock(current.spaceId);
@@ -121,17 +138,6 @@ export default function UnlockPage() {
     <main className="gate">
       <BondMark size={64} a={initial(current.myName)} b="" />
       <h1 className="gate__title">{APP_NAME}</h1>
-
-      {spaces.length > 1 && (
-        <div className="chips" role="radiogroup" aria-label="Choose a space">
-          {spaces.map((s) => (
-            <button key={s.spaceId} type="button" role="radio" aria-checked={s.spaceId === current.spaceId}
-              className={s.spaceId === current.spaceId ? "chip chip--on" : "chip"} onClick={() => choose(s)}>
-              {s.label || "Our space"}
-            </button>
-          ))}
-        </div>
-      )}
 
       {mode === "lock" && lock ? (
         <>

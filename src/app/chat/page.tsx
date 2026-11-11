@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import AboutYou from "@/components/AboutYou";
+import SpaceSwitcher from "@/components/SpaceSwitcher";
 import BondMark from "@/components/BondMark";
 
 import { pron, type Gender } from "@/lib/pronouns";
@@ -38,7 +39,7 @@ import { MAX_BYTES, type Theme } from "@/lib/media-limits";
 import { ageOn, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle, type CycleData, type DayKind } from "@/lib/planner";
 import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from "@/lib/rituals";
 import { enableNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
-import { clearVault, getVault, type Vault } from "@/lib/vault";
+import { clearVault, getVault, savedSpaces, type Vault } from "@/lib/vault";
 
 type Reaction = "love" | "angry";
 type Member = {
@@ -171,6 +172,8 @@ export default function ChatPage() {
     setStreakOpen(page === "streak"); setAboutOpen(page === "about"); setMenuOpen(page === "settings"); setDrawerOpen(false);
   };
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const [canSwitch, setCanSwitch] = useState(false);
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
 
@@ -206,6 +209,7 @@ export default function ChatPage() {
     if (window.location.pathname + window.location.search !== clean) window.history.replaceState(null, "", clean);
     setReady(true);
     setLockKind(getLock(v.spaceId)?.kind ?? null);
+    setCanSwitch(savedSpaces().length > 1);
     void reportNotificationState().then(setNotif);
   }, [router]);
 
@@ -982,7 +986,14 @@ export default function ChatPage() {
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
         <div className="dcard">
           <span className="dcard__mark">{mark(72)}</span>
-          <p className="dcard__names">{host?.name ?? ""} <span>&amp;</span> {guest?.name ?? info.space.label}</p>
+          {canSwitch || me.role === "host" ? (
+            <button type="button" className="dcard__names dcard__switch" onClick={() => { setDrawerOpen(false); setSwitchOpen(true); }} aria-label="Switch space">
+              {host?.name ?? ""} <span>&amp;</span> {guest?.name ?? info.space.label}
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z" /></svg>
+            </button>
+          ) : (
+            <p className="dcard__names">{host?.name ?? ""} <span>&amp;</span> {guest?.name ?? info.space.label}</p>
+          )}
           {(ageOf(host?.id) !== null || ageOf(guest?.id) !== null) && (
             <p className="dcard__ages">
               {[host, guest].filter(Boolean).map((m) => ageOf(m!.id) !== null ? `${m!.name}, ${ageOf(m!.id)}` : null).filter(Boolean).join("  ·  ")}
@@ -1379,6 +1390,7 @@ export default function ChatPage() {
       {liveOpen && (
         <LiveGame vault={vault} kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} />
       )}
+      {switchOpen && <SpaceSwitcher currentSpaceId={me.spaceId} isHost={me.role === "host"} onClose={() => setSwitchOpen(false)} />}
       {aboutOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="About you" onClick={() => setAboutOpen(false)}>
           <div className="sheet-up glass" onClick={(e) => e.stopPropagation()}>

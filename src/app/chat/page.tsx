@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Cha
 import { useRouter } from "next/navigation";
 import AboutYou from "@/components/AboutYou";
 import CallScreen from "@/components/call/CallScreen";
+import { loadCache, saveCache } from "@/lib/chat-cache";
 import { NotifPrompt, NotifySettings } from "@/components/Notifications";
 import SpaceSwitcher from "@/components/SpaceSwitcher";
 import BondMark from "@/components/BondMark";
@@ -56,7 +57,7 @@ type Member = {
 type Msg = {
   id: string; senderId: string; kind: string; viewOnce: boolean; viewedAt: string | null; deleted: boolean;
   reactions: Record<string, Reaction>; expiresAt: string | null; createdAt: string; editedAt?: string | null; iv: string | null; ct: string | null;
-  deletedReason?: string | null; hidden?: boolean;
+  deletedReason?: string | null; hidden?: boolean; clientId?: string | null;
   media: MediaState;
 };
 type Space = { label: string; disappearSeconds: number | null; theme: Theme; backgroundMediaId: string | null };
@@ -122,6 +123,7 @@ export default function ChatPage() {
   const [, bump] = useReducer((x: number) => x + 1, 0);
 
   const cursor = useRef<string | null>(null);
+  const cacheReady = useRef<Promise<void> | null>(null);   // the on-phone copy loads before the first fetch
   const syncing = useRef(false);
   const syncAgain = useRef(false);
   const hiddenAt = useRef<number | null>(null);
@@ -223,9 +225,29 @@ export default function ChatPage() {
     setWelcome(new URLSearchParams(window.location.search).get("welcome") === "1");
     const clean = `/chat?s=${v.spaceId}&m=${v.memberId}`;
     if (window.location.pathname + window.location.search !== clean) window.history.replaceState(null, "", clean);
+    // Show the chat from this phone's encrypted copy straight away; then fetch only what's new.
+    cacheReady.current = (async () => {
+      const c = await loadCache<{ cursor: string; info: Info; messages: Msg[]; calls: CallRow[] }>(v);
+      if (!c || !c.info || !Array.isArray(c.messages)) return;
+      cursor.current = c.cursor;
+      setInfo((cur) => cur ?? c.info);
+      setCalls((cur) => (cur.length ? cur : c.calls ?? []));
+      setMsgs((prev) => { const next = new Map(c.messages.map((m) => [m.id, m] as const)); prev.forEach((m, id) => next.set(id, m)); return next; });
+      await decryptList(c.messages);
+    })();
     setReady(true);
     setLockKind(getLock(v.spaceId)?.kind ?? null);
     setCanSwitch(savedSpaces().length > 1);
+    // Messages that hadn't gone out yet (app closed, no network): show them and send them now.
+    const waiting = readOutbox(v.spaceId);
+    if (waiting.length) {
+      setMsgs((prev) => {
+        const next = new Map(prev);
+        for (const o of waiting) next.set(o.tmp, { id: o.tmp, senderId: v.memberId, kind: o.kind, viewOnce: o.viewOnce, viewedAt: null, deleted: false, reactions: {}, expiresAt: null, createdAt: o.createdAt, iv: o.iv, ct: o.ct, media: null });
+        return next;
+      });
+      void (async () => { await decryptList(waiting.map((o) => ({ id: o.tmp, senderId: v.memberId, kind: o.kind, viewOnce: o.viewOnce, viewedAt: null, deleted: false, reactions: {}, expiresAt: null, createdAt: o.createdAt, iv: o.iv, ct: o.ct, media: null }))); waiting.forEach((o) => void deliver(o)); })();
+    }
     void clearSpaceNotifications(v.spaceId);
     void reportNotificationState().then(setNotif);
   }, [router]);
@@ -337,6 +359,7 @@ export default function ChatPage() {
     if (syncing.current) { syncAgain.current = true; return; }
     syncing.current = true;
     try {
+      if (cacheReady.current) { await cacheReady.current.catch(() => {}); cacheReady.current = null; }
       const q = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
@@ -355,7 +378,16 @@ export default function ChatPage() {
       if (data.messages.length) {
         setMsgs((prev) => {
           const next = new Map(prev);
-          for (const m of data.messages) { if (m.hidden) next.delete(m.id); else next.set(m.id, m); }
+          for (const m of data.messages) {
+            if (m.hidden) { next.delete(m.id); continue; }
+            if (m.clientId && next.has(`tmp-${m.clientId}`)) {
+              const tmp = `tmp-${m.clientId}`;
+              const p = payloads.current.get(tmp);
+              if (p !== undefined) { payloads.current.set(m.id, p); payloadIv.current.set(m.id, m.iv as string); }
+              next.delete(tmp);
+            }
+            next.set(m.id, m);
+          }
           return next;
         });
         await decryptList(data.messages);
@@ -538,12 +570,81 @@ export default function ChatPage() {
     atBottom.current = true;
   }
 
+  // ---------- sending instantly: on screen now, delivered in the background, never twice ----------
+  type Outgoing = { tmp: string; clientId: string; iv: string; ct: string; kind: string; viewOnce: boolean; createdAt: string };
+  const [unsent, setUnsent] = useState<Set<string>>(new Set());   // couldn't be delivered (yet)
+  const delivering = useRef(new Set<string>());
+  const outboxKey = (spaceId: string) => `ourspace:outbox:${spaceId}`;
+  function readOutbox(spaceId: string): Outgoing[] { try { return JSON.parse(localStorage.getItem(outboxKey(spaceId)) || "[]"); } catch { return []; } }
+  function writeOutbox(spaceId: string, list: Outgoing[]) { try { localStorage.setItem(outboxKey(spaceId), JSON.stringify(list)); } catch { /* full */ } }
+
+  /** The server has it: swap the temporary bubble for the real message. */
+  function delivered(tmp: string, real: { id: string; createdAt: string; expiresAt: string | null }) {
+    const p = payloads.current.get(tmp), piv = payloadIv.current.get(tmp);
+    if (p !== undefined) payloads.current.set(real.id, p);
+    if (piv) payloadIv.current.set(real.id, piv);
+    payloads.current.delete(tmp); payloadIv.current.delete(tmp);
+    setMsgs((prev) => {
+      const next = new Map(prev);
+      const m = next.get(tmp);
+      next.delete(tmp);
+      if (m && !next.has(real.id)) next.set(real.id, { ...m, id: real.id, createdAt: real.createdAt, expiresAt: real.expiresAt });
+      return next;
+    });
+    setUnsent((u) => { if (!u.has(tmp)) return u; const n = new Set(u); n.delete(tmp); return n; });
+  }
+
+  async function deliver(o: Outgoing) {
+    const v = vaultRef.current;
+    if (!v || delivering.current.has(o.tmp)) return;
+    delivering.current.add(o.tmp);
+    setUnsent((u) => { if (!u.has(o.tmp)) return u; const n = new Set(u); n.delete(o.tmp); return n; });
+    const waits = [0, 1000, 2000, 4000, 8000, 15000];
+    try {
+      for (const wait of waits) {
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        try {
+          const res = await api<{ id: string; createdAt: string; expiresAt: string | null }>("/api/messages", {
+            body: { iv: o.iv, ct: o.ct, viewOnce: o.viewOnce, kind: o.kind, clientId: o.clientId },
+          });
+          writeOutbox(v.spaceId, readOutbox(v.spaceId).filter((x) => x.tmp !== o.tmp));
+          delivered(o.tmp, res);
+          return;
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) { if ((await reconnect()) === "locked") return lockOut(); continue; }
+          if (err instanceof ApiError && err.status < 500 && err.status !== 408 && err.status !== 429) {
+            writeOutbox(v.spaceId, readOutbox(v.spaceId).filter((x) => x.tmp !== o.tmp));   // refused for good
+            setToast(err.message);
+            break;
+          }
+          // weak or no network: wait and try again
+        }
+      }
+      setUnsent((u) => new Set(u).add(o.tmp));
+    } finally {
+      delivering.current.delete(o.tmp);
+    }
+  }
+
+  /** Text and cards: shown at once and delivered in the background. Media: uploaded first (with a progress bar). */
   async function postMessage(base: Payload, mediaId?: string, once: boolean = viewOnce) {
     const v = vaultRef.current;
     if (!v) throw new Error("locked");
     const payload: Payload = reply ? { ...base, reply } : base;
     const sentOnce = once;
     const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
+    if (!mediaId) {
+      const clientId = crypto.randomUUID();
+      const o: Outgoing = { tmp: `tmp-${clientId}`, clientId, iv, ct, kind: payload.t, viewOnce: sentOnce, createdAt: new Date().toISOString() };
+      payloads.current.set(o.tmp, payload);
+      payloadIv.current.set(o.tmp, iv);
+      addLocal(v, o.tmp, payload.t, { createdAt: o.createdAt, expiresAt: null }, iv, ct, sentOnce);
+      writeOutbox(v.spaceId, [...readOutbox(v.spaceId), o]);
+      setViewOnce(false);
+      setReply(null);
+      void deliver(o);
+      return;
+    }
     const res = await api<{ id: string; createdAt: string; expiresAt: string | null; mediaExpiresAt: string | null }>("/api/messages", {
       body: { iv, ct, viewOnce: sentOnce, kind: payload.t, mediaId },
     });
@@ -562,8 +663,8 @@ export default function ChatPage() {
     setSending(true);
     try {
       if (editing) { await saveEdit(editing, body); return; }
-      await postMessage({ t: "text", body });
       setDraft("");
+      await postMessage({ t: "text", body });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return lockOut();
       setToast(err instanceof ApiError ? err.message : "Not sent. Check your connection and try again.");
@@ -934,6 +1035,30 @@ export default function ChatPage() {
     if (!interacted.current && !draft) setNotifPrompt(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notif, hasPartner, aboutOpen]);
+
+  // Keep the on-phone copy fresh: a moment after the chat changes, save it (encrypted).
+  useEffect(() => {
+    const v = vaultRef.current;
+    if (!v || !info || !cursor.current) return;
+    const t = setTimeout(() => {
+      const keep = Array.from(msgs.values()).filter((m) => !m.id.startsWith("tmp-")).sort((a, b) => Number(a.id) - Number(b.id)).slice(-300);
+      void saveCache(v, { cursor: cursor.current, info, messages: keep, calls });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [info, msgs, calls]);
+
+  // The network came back: anything waiting goes out right away.
+  useEffect(() => {
+    const onOnline = () => {
+      const v = vaultRef.current;
+      if (!v) return;
+      readOutbox(v.spaceId).forEach((o) => void deliver(o));
+      void syncNow();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Count new messages from them that arrive while you're scrolled up.
   useEffect(() => {
@@ -1356,16 +1481,17 @@ export default function ChatPage() {
                   time={timeOf(m.createdAt)}
                   edited={!!m.editedAt}
                   disappears={!!m.expiresAt}
-                  ticks={mine && !m.viewOnce ? (seen ? "seen" : "sent") : "none"}
+                  ticks={!mine ? "none" : unsent.has(m.id) ? "failed" : m.id.startsWith("tmp-") ? "pending" : m.viewOnce ? "none" : seen ? "seen" : "sent"}
+                  onRetry={() => { const o = vault && readOutbox(vault.spaceId).find((x) => x.tmp === m.id); if (o) void deliver(o); }}
                   reply={payload && "reply" in payload && payload.reply ? payload.reply : null}
                   replyName={nameOf}
                   reactions={Object.values(m.reactions)}
                   highlighted={flash === m.id}
                   wide={isMedia}
-                  canReply={!m.viewOnce && !!partner && m.deletedReason !== "removed"}
+                  canReply={!m.viewOnce && !!partner && m.deletedReason !== "removed" && !m.id.startsWith("tmp-")}
                   onReply={() => startReply(m)}
                   onMenu={(rect) => setMenuFor({ m, rect })}
-                  onLove={() => { if (!m.viewOnce && m.deletedReason !== "removed") void react(m, "love"); }}
+                  onLove={() => { if (!m.viewOnce && m.deletedReason !== "removed" && !m.id.startsWith("tmp-")) void react(m, "love"); }}
                   onJump={jumpTo}
                 >
                   {m.deletedReason === "removed" ? (
@@ -1465,15 +1591,15 @@ export default function ChatPage() {
         <MessageMenu
           rect={menuFor.rect}
           mine={menuFor.m.senderId === me.id}
-          canReact={!menuFor.m.viewOnce && menuFor.m.deletedReason !== "removed"}
+          canReact={!menuFor.m.viewOnce && menuFor.m.deletedReason !== "removed" && !menuFor.m.id.startsWith("tmp-")}
           canCopy={payloads.current.get(menuFor.m.id)?.t === "text" && !menuFor.m.viewOnce}
           myReaction={menuFor.m.reactions[me.id] ?? null}
           onReact={(r) => react(menuFor.m, r)}
           onReply={() => startReply(menuFor.m)}
           onCopy={() => copyMessage(menuFor.m)}
-          canEdit={canEdit(menuFor.m)}
+          canEdit={canEdit(menuFor.m) && !menuFor.m.id.startsWith("tmp-")}
           onEdit={() => startEdit(menuFor.m)}
-          onDelete={() => { setDeleting(menuFor.m); setMenuFor(null); }}
+          onDelete={menuFor.m.id.startsWith("tmp-") ? undefined : () => { setDeleting(menuFor.m); setMenuFor(null); }}
           onClose={() => setMenuFor(null)}
         />
       )}

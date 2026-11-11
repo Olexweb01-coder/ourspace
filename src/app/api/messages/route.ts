@@ -5,7 +5,7 @@ import { claimMedia } from "@/lib/media-server";
 import { pushTo } from "@/lib/push";
 import { isMilestone } from "@/lib/rituals";
 import { getStreak } from "@/lib/streak-server";
-import { B64_RE, fail, json, readJson } from "@/lib/server-utils";
+import { B64_RE, fail, json, readJson, UUID_RE } from "@/lib/server-utils";
 import { getMe, getPartnerId } from "@/lib/session";
 
 const MAX_CT = 60_000; // base64 chars: text, or a file's description + tiny preview
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
   const me = await getMe();
   if (!me) return fail("Locked", 401);
 
-  const body = await readJson<{ iv?: string; ct?: string; viewOnce?: boolean; kind?: string; mediaId?: string }>(req);
+  const body = await readJson<{ iv?: string; ct?: string; viewOnce?: boolean; kind?: string; mediaId?: string; clientId?: string }>(req);
   const iv = body?.iv;
   const ct = body?.ct;
   if (typeof iv !== "string" || iv.length > 32 || !B64_RE.test(iv)) return fail("Invalid message");
@@ -41,13 +41,24 @@ export async function POST(req: Request) {
   }
 
   const sql = db();
+  // A retry of the same send (same tag from the phone) returns the first copy instead of making a second.
+  const clientId = typeof body?.clientId === "string" && UUID_RE.test(body.clientId) ? body.clientId : null;
+  if (clientId) {
+    const dup = await sql`select id::text as id, created_at, expires_at from messages where sender_id = ${me.memberId} and client_id = ${clientId}::uuid`;
+    if (dup[0]) return json({ id: dup[0].id, createdAt: dup[0].created_at, expiresAt: dup[0].expires_at, mediaExpiresAt: null });
+  }
   const rows = await sql`
-    insert into messages (space_id, sender_id, kind, iv, ciphertext, view_once, expires_at, media_id)
+    insert into messages (space_id, sender_id, kind, iv, ciphertext, view_once, expires_at, media_id, client_id)
     select s.id, ${me.memberId}, ${kind}, ${iv}, ${ct}, ${viewOnce},
            case when s.disappear_seconds is null then null else now() + make_interval(secs => s.disappear_seconds) end,
-           ${mediaId}::uuid
+           ${mediaId}::uuid, ${clientId}::uuid
     from spaces s where s.id = ${me.spaceId}
+    on conflict (sender_id, client_id) where client_id is not null do nothing
     returning id::text as id, created_at, expires_at`;
+  if (!rows[0] && clientId) {
+    const dup = await sql`select id::text as id, created_at, expires_at from messages where sender_id = ${me.memberId} and client_id = ${clientId}::uuid`;
+    return json({ id: dup[0].id, createdAt: dup[0].created_at, expiresAt: dup[0].expires_at, mediaExpiresAt: null });
+  }
   const msg = rows[0];
 
   let mediaExpiresAt: string | null = null;

@@ -12,7 +12,8 @@ type Props = {
   time: string;
   edited?: boolean;
   disappears: boolean;
-  ticks: "none" | "sent" | "seen";
+  ticks: "none" | "sent" | "seen" | "pending" | "failed";
+  onRetry?: () => void;
   reply: ReplyRef | null;
   replyName: (memberId: string) => string;
   reactions: string[];
@@ -110,7 +111,13 @@ export default function MessageRow(p: Props) {
           {p.disappears && <span aria-label="Disappears">⏳</span>}
           {p.edited && <span className="b__edited">edited</span>}
           {p.time}
-          {p.ticks !== "none" && (
+          {p.ticks === "pending" && (
+            <svg className="ticks ticks--pending" viewBox="0 0 16 16" aria-label="Sending"><circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.3 1.6" /></svg>
+          )}
+          {p.ticks === "failed" && (
+            <button type="button" className="b__retry" onClick={(e) => { e.stopPropagation(); p.onRetry?.(); }}>Not sent · tap to retry</button>
+          )}
+          {(p.ticks === "sent" || p.ticks === "seen") && (
             <svg className={p.ticks === "seen" ? "ticks ticks--seen" : "ticks"} viewBox="0 0 18 12" aria-label={p.ticks === "seen" ? "Seen" : "Sent"}>
               <path d="M1 6.5l3.2 3.2L11 2.8" />
               {p.ticks === "seen" && <path d="M6.5 9.7L13.4 2.8" />}

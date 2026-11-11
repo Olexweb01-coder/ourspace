@@ -1,4 +1,4 @@
-import { settleCalls } from "@/lib/calls";
+import { RING_SECONDS, STALE_HOURS } from "@/lib/calls";
 import { after } from "next/server";
 import { pushTo } from "@/lib/push";
 import { db } from "@/lib/db";
@@ -16,10 +16,14 @@ export async function GET(req: Request) {
   if (since && Number.isNaN(since.getTime())) return fail("Bad cursor");
 
   const sql = db();
-  for (const m of await settleCalls(me.spaceId)) {
-    after(() => pushTo(m.callee_id, { title: "Missed call", body: `You missed a ${m.kind} call.`, tag: "call" }));
-  }
+  // Everything in ONE round trip to the database (fewer trips = faster on weak networks).
   const results = await sql.transaction([
+    // unanswered calls become missed; abandoned calls end (same rules as lib/calls.ts)
+    sql`update calls set status = 'missed', ended_at = now()
+        where space_id = ${me.spaceId} and status = 'ringing' and created_at < now() - make_interval(secs => ${RING_SECONDS})
+        returning id, caller_id, callee_id, kind`,
+    sql`update calls set status = 'ended', ended_at = now()
+        where space_id = ${me.spaceId} and status = 'active' and created_at < now() - make_interval(hours => ${STALE_HOURS})`,
     sql`update messages set deleted = true, iv = '', ciphertext = '', reactions = '{}'::jsonb, updated_at = now()
         where space_id = ${me.spaceId} and deleted = false and expires_at is not null and expires_at < now()`,
     sql`update members set last_seen_at = now() where id = ${me.memberId}`,
@@ -27,7 +31,7 @@ export async function GET(req: Request) {
     since
       // 3s overlap so commits that raced the last cursor are never missed; client de-dupes by id.
       ? sql`select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
-              msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.deleted_reason,
+              msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.deleted_reason, msg.client_id,
               exists (select 1 from hidden_messages h where h.message_id = msg.id and h.member_id = ${me.memberId}) as hidden_for_me, msg.media_id,
               case when msg.deleted then null else msg.iv end as iv,
               case when msg.deleted then null else msg.ciphertext end as ciphertext,
@@ -39,7 +43,7 @@ export async function GET(req: Request) {
             order by msg.updated_at asc limit 500`
       : sql`select * from (
               select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
-                msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.deleted_reason,
+                msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.deleted_reason, msg.client_id,
               exists (select 1 from hidden_messages h where h.message_id = msg.id and h.member_id = ${me.memberId}) as hidden_for_me, msg.media_id,
                 case when msg.deleted then null else msg.iv end as iv,
                 case when msg.deleted then null else msg.ciphertext end as ciphertext,
@@ -83,7 +87,8 @@ export async function GET(req: Request) {
         where space_id = ${me.spaceId} and created_at > now() - interval '30 days' order by created_at desc limit 40`,
   ]);
 
-  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows, callRows] = results;
+  const [missedNow, , , , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows, callRows] = results;
+  for (const m of missedNow) after(() => pushTo(m.callee_id, { title: "Missed call", body: `You missed a ${m.kind} call.`, tag: "call" }));
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
   const st = computeStreak(completeDays, today);
@@ -140,6 +145,7 @@ export async function GET(req: Request) {
       createdAt: r.created_at,
       editedAt: r.edited_at ?? null,
       deletedReason: r.deleted_reason ?? null,
+      clientId: r.client_id ?? null,
       hidden: r.hidden_for_me === true,
       iv: r.iv,
       ct: r.ciphertext,

@@ -161,6 +161,14 @@ A video channel always exists, so camera on/off and screen sharing (computers on
 Calls ring in the app (and by notification when it's closed), go missed after 45 s, and show in the chat history.
 Setup: run `db/015_calls.sql` once in Neon, and set `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD` in Vercel.
 
+## Speed
+- Server functions run in Frankfurt (`vercel.json` regions: fra1), next to the Neon database.
+- The chat opens instantly from an encrypted copy on the phone (IndexedDB, 7-day limit), then fetches only what's new.
+- Each sync is one database round trip.
+- Text messages appear at once and are delivered in the background with retries; an outbox on the phone keeps them
+  across restarts; a tag per message (client_id) means a retry can never create a duplicate.
+Setup: run `db/016_send_once.sql` once in Neon.
+
 ## Layers and computer layout
 On a computer (960px and wider) the side panel stays open, so pages and sheets open in the chat area beside it and
 only one page is open at a time. Full-screen moments (celebrations, photo viewer, view once, statuses, live games)

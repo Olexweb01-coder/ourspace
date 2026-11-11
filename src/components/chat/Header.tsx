@@ -14,22 +14,24 @@ type Props = {
   onNudge: (() => void) | null;
   nudgeLabel: string;
   onCall?: ((kind: "voice" | "video") => void) | null;
+  onPhoto?: () => void;
 };
 
 // The heading: her name in gold-rose, a heartbeat line that pulses while she's here.
-export default function Header({ mark, name, sub, live, statusRing, streak, onMenu, onWho, onStreak, onNudge, nudgeLabel, onCall }: Props) {
+export default function Header({ mark, name, sub, live, statusRing, streak, onMenu, onWho, onStreak, onNudge, nudgeLabel, onCall, onPhoto }: Props) {
   return (
     <header className={live ? "chead glass chead--live" : "chead glass"}>
       <button type="button" className="chead__menu icon-btn" onClick={onMenu} aria-label="Open menu">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16v2H4zm0 4.5h16v2H4zm0 4.5h10v2H4z" /></svg>
       </button>
-      <button type="button" className="chead__who" onClick={onWho} aria-label={statusRing === "new" ? `${name} posted a status. Open it` : `About ${name}`}>
-        <span className={`sring sring--${statusRing}`}>{mark}</span>
-        <span className="chead__text">
+      <div className="chead__who">
+        <button type="button" className={`sring sring--${statusRing} chead__photo`} onClick={onPhoto ?? onWho}
+          aria-label={statusRing === "new" ? `${name} posted a status. Open it` : `See ${name}'s photo`}>{mark}</button>
+        <button type="button" className="chead__text" onClick={onWho} aria-label={statusRing === "new" ? `${name} posted a status. Open it` : `About ${name}`}>
           <span className="chead__name">{name}</span>
           <span className="chead__sub">{sub}</span>
-        </span>
-      </button>
+        </button>
+      </div>
       {streak && (
         <button type="button" className={streak.done ? "streak-pill streak-pill--done" : "streak-pill"} onClick={onStreak}
           aria-label={`${streak.count} day streak`}>

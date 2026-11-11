@@ -185,6 +185,7 @@ export default function ChatPage() {
   };
   const [aboutOpen, setAboutOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [loadTrouble, setLoadTrouble] = useState<{ count: number; server: boolean }>({ count: 0, server: false });
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [activeCall, setActiveCall] = useState<{ id: string; role: "caller" | "callee"; kind: "voice" | "video" } | null>(null);
@@ -1389,6 +1390,7 @@ export default function ChatPage() {
             streak={partner ? { count: st.current, done: st.todayDone } : null}
             onMenu={() => setDrawerOpen(true)}
             onWho={() => (theirUnseen ? setStatusView("theirs") : setDrawerOpen(true))}
+            onPhoto={() => (theirUnseen ? setStatusView("theirs") : partner && avatars[partner.id] ? setPhotoOpen(true) : setToast(`${partnerName} hasn't added a photo yet.`))}
             onStreak={() => openOnly("streak")}
             onNudge={partner ? nudge : null}
             nudgeLabel={`Nudge ${partnerName}`}
@@ -1818,6 +1820,9 @@ export default function ChatPage() {
         <CallScreen vault={vault} callId={activeCall.id} role={activeCall.role} kind={activeCall.kind} partnerName={partnerName}
           partnerAvatar={partner ? avatars[partner.id] ?? null : null}
           onClose={({ reason }) => { setActiveCall(null); if (reason === "no-media") setToast("Allow the microphone for Our Space in your browser settings, then call again."); void syncNow(); }} />
+      )}
+      {photoOpen && partner && avatars[partner.id] && (
+        <MediaViewer kind="photo" url={avatars[partner.id]} caption={partner.name} onClose={() => setPhotoOpen(false)} />
       )}
       {switchOpen && <SpaceSwitcher currentSpaceId={me.spaceId} isHost={me.role === "host"} onClose={() => setSwitchOpen(false)} />}
       {aboutOpen && (

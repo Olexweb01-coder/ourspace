@@ -1,6 +1,7 @@
 "use client";
 import type { FormEvent, KeyboardEvent, RefObject } from "react";
-import { ANGRY, LOVE } from "@/lib/emoji";
+import { useState } from "react";
+import { MORE_EMOJI, QUICK_REACTIONS } from "@/lib/emoji";
 
 type Props = {
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -25,8 +26,16 @@ type Props = {
 };
 
 export default function Composer(p: Props) {
+  const [emojiOpen, setEmojiOpen] = useState(false);
   return (
     <div className="composer2">
+      {emojiOpen && (
+        <div className="emojipanel glass" role="listbox" aria-label="Emoji">
+          {[...QUICK_REACTIONS, ...MORE_EMOJI].map((e, i) => (
+            <button key={`${e}${i}`} type="button" onClick={() => p.onEmoji(e)} aria-label={`Add ${e}`}>{e}</button>
+          ))}
+        </div>
+      )}
       {p.editing && (
         <div className="replybar replybar--edit glass">
           <span className="replybar__line" aria-hidden="true" />
@@ -53,8 +62,10 @@ export default function Composer(p: Props) {
       )}
       <form className="composer2__row" onSubmit={p.onSubmit}>
         <div className={p.viewOnce ? "pill glass pill--once" : "pill glass"}>
-          <button type="button" className="pill__emoji" onClick={() => p.onEmoji(LOVE)} aria-label="Add love">{LOVE}</button>
-          <button type="button" className="pill__emoji" onClick={() => p.onEmoji(ANGRY)} aria-label="Add angry">{ANGRY}</button>
+          <button type="button" className={emojiOpen ? "pill__emoji pill__emoji--on" : "pill__emoji"} onClick={() => setEmojiOpen((o) => !o)}
+            aria-expanded={emojiOpen} aria-label={emojiOpen ? "Close emoji" : "Emoji"}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-3.5-9A1.5 1.5 0 1 0 8.5 8a1.5 1.5 0 0 0 0 3zm7 0A1.5 1.5 0 1 0 15.5 8a1.5 1.5 0 0 0 0 3zM12 17.5a5.5 5.5 0 0 0 5.1-3.5H6.9a5.5 5.5 0 0 0 5.1 3.5z" /></svg>
+          </button>
           <label className="sr-only" htmlFor="draft">Message</label>
           <textarea
             id="draft"

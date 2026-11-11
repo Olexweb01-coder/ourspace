@@ -15,8 +15,10 @@ type Props = {
 export default function MediaViewer({ kind, url, caption, onClose, actions, closeLabel = "Close" }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onBack = (e: Event) => { e.preventDefault(); onClose(); };   // the back gesture closes the viewer
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("ourspace-back", onBack);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("ourspace-back", onBack); };
   }, [onClose]);
   // Drawn at the top of the page, not inside the message list, so nothing (header, message box, side panel) can cover it.
   const [host, setHost] = useState<HTMLElement | null>(null);

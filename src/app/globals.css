@@ -1299,3 +1299,49 @@ button.notice { cursor: pointer; }
 .chead__who { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .chead__photo { border: 0; background: none; padding: 0; cursor: pointer; flex-shrink: 0; }
 .chead__text { border: 0; background: none; padding: 0; color: inherit; font: inherit; text-align: left; display: flex; flex-direction: column; min-width: 0; cursor: pointer; }
+
+/* ---------- typing bubble, emoji panel ---------- */
+.typing-row { margin-top: 4px; }
+.typing-b { display: inline-flex; gap: 4px; align-items: center; padding: 12px 14px !important; }
+.typing-b span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: tdot 1.2s ease-in-out infinite; }
+.typing-b span:nth-child(2) { animation-delay: 0.15s; }
+.typing-b span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes tdot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-5px); opacity: 1; } }
+.emojipanel { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 2px; max-height: 220px; overflow-y: auto; padding: 8px; border-radius: 18px; margin-bottom: 8px; overscroll-behavior: contain; }
+.emojipanel button { border: 0; background: none; font-size: 1.5rem; padding: 6px 0; border-radius: 10px; line-height: 1; }
+.emojipanel button:hover, .emojipanel button:active { background: rgba(255, 255, 255, 0.08); }
+.pill__emoji svg { width: 24px; height: 24px; fill: var(--candle); }
+.pill__emoji--on svg { fill: var(--rose); }
+@media (prefers-reduced-motion: reduce) { .typing-b span { animation: none; opacity: 0.8; } }
+
+/* ---------- together: when she's online, the whole app feels it ---------- */
+.shell { transition: background-color 1.2s ease; }
+.shell::before { content: ""; position: fixed; inset: -20%; pointer-events: none; z-index: 0; opacity: 0; transition: opacity 1.4s ease;
+  background: radial-gradient(45% 35% at 50% 40%, rgba(232, 138, 161, 0.22), transparent 70%),
+              radial-gradient(35% 30% at 20% 85%, rgba(246, 201, 127, 0.14), transparent 70%),
+              radial-gradient(35% 30% at 85% 15%, rgba(194, 65, 107, 0.16), transparent 70%); }
+.shell--together::before { opacity: 1; animation: breathe 6s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { transform: scale(1); filter: saturate(1); } 50% { transform: scale(1.06); filter: saturate(1.25); } }
+.shell--together .chead { box-shadow: 0 0 0 1px rgba(246, 201, 127, 0.18), 0 8px 30px rgba(232, 138, 161, 0.18); }
+.shell--together .chead .sring { animation: ringglow 2.4s ease-in-out infinite; border-radius: 999px; }
+@keyframes ringglow { 0%, 100% { box-shadow: 0 0 0 0 rgba(246, 201, 127, 0); } 50% { box-shadow: 0 0 14px 3px rgba(246, 201, 127, 0.45); } }
+.shell--together .pill { box-shadow: 0 0 0 1px rgba(232, 138, 161, 0.35), 0 6px 26px rgba(232, 138, 161, 0.22); transition: box-shadow 1s; }
+.arrival { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 76px); transform: translateX(-50%); z-index: 15; pointer-events: none;
+  padding: 8px 16px; border-radius: 999px; background: rgba(42, 20, 33, 0.85); color: var(--candle); font-weight: 600; font-size: 0.9rem;
+  box-shadow: 0 8px 30px rgba(232, 138, 161, 0.35); animation: arrive 3.2s ease forwards; }
+@keyframes arrive { 0% { opacity: 0; transform: translate(-50%, -8px) scale(0.96); } 12%, 80% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -6px); } }
+@media (prefers-reduced-motion: reduce) { .shell--together::before, .shell--together .chead .sring, .arrival { animation: none; } }
+
+/* ---------- voice waves, video previews ---------- */
+.recorder__bars, .voice__wave { display: flex; align-items: center; gap: 2px; height: 30px; flex: 1; min-width: 0; }
+.recorder__bars span, .voice__wave span { flex: 1; min-width: 2px; max-width: 4px; border-radius: 2px; background: currentColor; opacity: 0.45; transition: height 0.08s linear; }
+.recorder__bars span { background: var(--rose); opacity: 0.9; }
+.voice__wave span.on { opacity: 1; background: var(--candle); }
+.vthumb { position: relative; display: block; width: min(240px, 62vw); max-height: 320px; aspect-ratio: 16 / 9; padding: 0; border: 0; border-radius: 14px; overflow: hidden; background: #0c0509; cursor: pointer; }
+.vthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vthumb__play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: rgba(12, 5, 9, 0.55); }
+.vthumb__play svg { width: 26px; height: 26px; fill: #fff; margin-left: 3px; }
+.vthumb__spin { width: 26px; height: 26px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.3); border-top-color: #fff; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.vthumb__meta { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(12, 5, 9, 0.6); color: #fff; font-size: 0.75rem; }
+@media (prefers-reduced-motion: reduce) { .vthumb__spin { animation: none; } }

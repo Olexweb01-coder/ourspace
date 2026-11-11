@@ -6,8 +6,8 @@ import type { Vault } from "./vault";
 
 export type MediaPayload =
   | { t: "photo"; mediaId: string; mime: string; w: number; h: number; thumb?: string; size: number; caption?: string }
-  | { t: "video"; mediaId: string; mime: string; name: string; size: number; caption?: string }
-  | { t: "voice"; mediaId: string; mime: string; duration: number; size: number }
+  | { t: "video"; mediaId: string; mime: string; name: string; size: number; caption?: string; thumb?: string; duration?: number; w?: number; h?: number }
+  | { t: "voice"; mediaId: string; mime: string; duration: number; size: number; wave?: number[] }
   | { t: "file"; mediaId: string; mime: string; name: string; size: number; caption?: string };
 
 export const fileAad = (spaceId: string, mediaId: string) => `file:${spaceId}:${mediaId}`;
@@ -147,4 +147,26 @@ export function pickAudioMime(): string {
   const options = ["audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
   if (typeof MediaRecorder === "undefined") return "";
   return options.find((m) => MediaRecorder.isTypeSupported(m)) ?? "";
+}
+
+/** A small preview picture of a video (its first moments), made on this phone before sending. */
+export async function videoPreview(file: File): Promise<{ thumb: string; duration: number; w: number; h: number } | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    const v = document.createElement("video");
+    v.muted = true; v.playsInline = true; v.preload = "metadata"; v.src = url;
+    await new Promise<void>((res, rej) => { v.onloadedmetadata = () => res(); v.onerror = () => rej(new Error("no video")); setTimeout(() => rej(new Error("slow")), 6000); });
+    v.currentTime = Math.min(0.5, (v.duration || 1) / 3);
+    await new Promise<void>((res, rej) => { v.onseeked = () => res(); setTimeout(() => rej(new Error("slow")), 6000); });
+    const scale = Math.min(1, 320 / Math.max(v.videoWidth, v.videoHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(v.videoWidth * scale)); c.height = Math.max(1, Math.round(v.videoHeight * scale));
+    c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
+    const thumb = c.toDataURL("image/jpeg", 0.6).split(",")[1];
+    return { thumb, duration: Math.round(v.duration || 0), w: v.videoWidth, h: v.videoHeight };
+  } catch {
+    return null;   // some formats can't be previewed in the browser: it still sends, just without a picture
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

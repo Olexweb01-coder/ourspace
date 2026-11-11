@@ -37,6 +37,7 @@ import { dayLabel, initial, isOnline, sinceLabel, timeOf } from "@/lib/format";
 import { personalizeInstall } from "@/lib/install";
 import {
   compressImage, forgetAllMediaUrls, forgetMediaUrl, formatBytes, mediaUrl, uploadEncrypted, type MediaPayload,
+  videoPreview,
 } from "@/lib/media-client";
 import { MAX_BYTES, type Theme } from "@/lib/media-limits";
 import { ageOn, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle, type CycleData, type DayKind } from "@/lib/planner";
@@ -186,6 +187,8 @@ export default function ChatPage() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [arrived, setArrived] = useState(false);
+  const wasOnline = useRef<boolean | null>(null);
   const [loadTrouble, setLoadTrouble] = useState<{ count: number; server: boolean }>({ count: 0, server: false });
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [activeCall, setActiveCall] = useState<{ id: string; role: "caller" | "callee"; kind: "voice" | "video" } | null>(null);
@@ -759,8 +762,9 @@ export default function ChatPage() {
     openPreview("video", [file]);
   }
   async function sendVideo(file: File, opts: { caption?: string; once?: boolean }) {
+    const prev = await videoPreview(file);   // shows on her phone before the video downloads
     await sendMedia("Video", await file.arrayBuffer(), (mediaId, caption) =>
-      ({ t: "video", mediaId, mime: file.type || "video/mp4", name: file.name || "video.mp4", size: file.size, caption }), opts);
+      ({ t: "video", mediaId, mime: file.type || "video/mp4", name: file.name || "video.mp4", size: file.size, caption, ...(prev ?? {}) }), opts);
   }
 
   async function sendFile(file: File) {
@@ -776,10 +780,10 @@ export default function ChatPage() {
     if (file) await sendFile(file);
   }
 
-  async function onVoice(bytes: ArrayBuffer, mime: string, seconds: number) {
+  async function onVoice(bytes: ArrayBuffer, mime: string, seconds: number, wave: number[]) {
     setRecording(false);
     await sendMedia("Voice note", bytes, (mediaId) =>
-      ({ t: "voice", mediaId, mime, duration: Math.round(seconds), size: bytes.byteLength }));
+      ({ t: "voice", mediaId, mime, duration: Math.round(seconds), size: bytes.byteLength, ...(wave.length ? { wave } : {}) }));
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -1048,6 +1052,65 @@ export default function ChatPage() {
     return () => clearTimeout(t);
   }, [info, msgs, calls]);
 
+  // ---------- back gestures (iPhone swipe, Android back): stay in the app ----------
+  // Close whatever is on top; with nothing open, the side panel opens. Never back to the passcode screen.
+  const backRef = useRef<() => void>(() => {});
+  backRef.current = () => {
+    const ev = new CustomEvent("ourspace-back", { cancelable: true });
+    window.dispatchEvent(ev);                       // a photo or video viewer closes itself
+    if (ev.defaultPrevented) return;
+    if (activeCall) return;                         // a back swipe never hangs up a call
+    if (menuFor) return setMenuFor(null);
+    if (deleting) return setDeleting(null);
+    if (pending) return closePreview();
+    if (photoOpen) return setPhotoOpen(false);
+    if (statusView) return setStatusView(null);
+    if (statusCompose) return setStatusCompose(false);
+    if (switchOpen) return setSwitchOpen(false);
+    if (notifPrompt) return setNotifPrompt(false);
+    if (lockSetupOpen) return setLockSetupOpen(false);
+    if (aboutOpen) return setAboutOpen(false);
+    if (liveOpen) return setLiveOpen(null);
+    if (moodOpen) return setMoodOpen(false);
+    if (streakOpen) return setStreakOpen(false);
+    if (plannerOpen) return setPlannerOpen(false);
+    if (gamesOpen) return setGamesOpen(false);
+    if (menuOpen) return setMenuOpen(false);
+    if (attachOpen) return setAttachOpen(false);
+    setDrawerOpen((o) => !o);
+  };
+  useEffect(() => {
+    history.pushState({ ourspace: true }, "");
+    const onPop = () => { backRef.current(); history.pushState({ ourspace: true }, ""); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  // A swipe in from the left edge opens the side panel.
+  const edge = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const start = (e: TouchEvent) => { const t = e.touches[0]; edge.current = t.clientX < 28 ? { x: t.clientX, y: t.clientY } : null; };
+    const move = (e: TouchEvent) => {
+      const s0 = edge.current, t = e.touches[0];
+      if (!s0) return;
+      if (t.clientX - s0.x > 60 && Math.abs(t.clientY - s0.y) < 50) { edge.current = null; setDrawerOpen(true); }
+    };
+    window.addEventListener("touchstart", start, { passive: true });
+    window.addEventListener("touchmove", move, { passive: true });
+    return () => { window.removeEventListener("touchstart", start); window.removeEventListener("touchmove", move); };
+  }, []);
+
+  // She just came online: a small moment (not on first load).
+  const onlineNow = isOnline(info?.members.find((m) => m.id !== info.me.id)?.lastSeenAt ?? null);
+  useEffect(() => {
+    if (wasOnline.current === false && onlineNow) {
+      setArrived(true);
+      const t = setTimeout(() => setArrived(false), 3200);
+      wasOnline.current = onlineNow;
+      return () => clearTimeout(t);
+    }
+    if (info) wasOnline.current = onlineNow;
+  }, [onlineNow, info]);
+
   // The network came back: anything waiting goes out right away.
   useEffect(() => {
     const onOnline = () => {
@@ -1314,7 +1377,7 @@ export default function ChatPage() {
   let lastSender = "";
   let lastTime = 0;
   return (
-    <main className="shell" data-theme={info.space.theme}>
+    <main className={online ? "shell shell--together" : "shell"} data-theme={info.space.theme}>
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
         <div className="dcard">
           <span className="dcard__mark">{mark(72)}</span>
@@ -1536,6 +1599,11 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
+          {partner?.typing && (
+            <div className="row row--start typing-row" aria-live="polite" aria-label={`${partner.name} is typing`}>
+              <div className="b b--tail typing-b"><span /><span /><span /></div>
+            </div>
+          )}
         </div>
 
         {!atBottomUI && (
@@ -1821,6 +1889,7 @@ export default function ChatPage() {
           partnerAvatar={partner ? avatars[partner.id] ?? null : null}
           onClose={({ reason }) => { setActiveCall(null); if (reason === "no-media") setToast("Allow the microphone for Our Space in your browser settings, then call again."); void syncNow(); }} />
       )}
+      {arrived && partner && <div className="arrival" role="status">{partner.name} is here <span aria-hidden="true">♥</span></div>}
       {photoOpen && partner && avatars[partner.id] && (
         <MediaViewer kind="photo" url={avatars[partner.id]} caption={partner.name} onClose={() => setPhotoOpen(false)} />
       )}

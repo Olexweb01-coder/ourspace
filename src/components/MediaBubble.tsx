@@ -56,9 +56,9 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
     }
   }
 
-  // Photos load when they scroll into view.
+  // Photos, videos and voice notes download by themselves when they scroll into view: ready when you tap.
   useEffect(() => {
-    if (payload.t !== "photo" || expired || url) return;
+    if (payload.t === "file" || expired || url) return;
     const el = holder.current;
     if (!el) return;
     const io = new IntersectionObserver((entries) => {
@@ -68,6 +68,10 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
     return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload.mediaId, expired]);
+
+  useEffect(() => {
+    if (payload.t === "voice" && url && audio.current && !audio.current.src) { audio.current.src = url; audio.current.preload = "auto"; }
+  }, [url, payload.t]);
 
   if (expired) {
     return <div className="bubble bubble--once">This {NOUN[payload.t]} has expired.</div>;
@@ -125,9 +129,28 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
     );
   }
 
+  if (payload.t === "video" && payload.thumb) {
+    const mins = payload.duration ? `${Math.floor(payload.duration / 60)}:${String(payload.duration % 60).padStart(2, "0")}` : "";
+    return (
+      <div className="media" ref={holder}>
+        <button type="button" className="vthumb" onClick={async () => { if (await load()) setViewing(true); }}
+          style={payload.w && payload.h ? { aspectRatio: `${payload.w} / ${payload.h}` } : undefined} aria-label={`Play video${mins ? `, ${mins}` : ""}`}>
+          <img src={`data:image/jpeg;base64,${payload.thumb}`} alt="" />
+          <span className="vthumb__play" aria-hidden="true">
+            {url ? <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg> : <span className="vthumb__spin" />}
+          </span>
+          <span className="vthumb__meta">{mins}{mins ? " · " : ""}{url ? formatBytes(payload.size) : "Downloading…"}</span>
+        </button>
+        {caption}
+        {keepLine}
+        {viewing && url && <MediaViewer kind="video" url={url} caption={payload.caption} onClose={() => setViewing(false)} actions={viewerActions} />}
+      </div>
+    );
+  }
+
   if (payload.t === "video") {
     return (
-      <div className="media">
+      <div className="media" ref={holder}>
         <button type="button" className="media-card" onClick={async () => { if (await load()) setViewing(true); }}>
           <span className="media-card__icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg>
@@ -156,15 +179,20 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
       if (el.paused) { await el.play().catch(() => onToast("Couldn't play it on this phone.")); }
       else el.pause();
     }
+    const wave = payload.wave && payload.wave.length ? payload.wave : Array.from({ length: 40 }, (_, i) => 18 + ((i * 37) % 23));
     return (
-      <div className="media">
+      <div className="media" ref={holder}>
         <div className="voice">
           <button type="button" className="voice__play" onClick={toggle} aria-label={playing ? "Pause" : "Play voice note"}>
             {playing
               ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
               : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>}
           </button>
-          <span className="voice__track" aria-hidden="true"><span style={{ width: `${progress * 100}%` }} /></span>
+          <span className="voice__wave" aria-hidden="true">
+            {wave.map((h, i) => (
+              <span key={i} className={i / wave.length < progress ? "on" : ""} style={{ height: `${Math.max(12, h)}%` }} />
+            ))}
+          </span>
           <span className="voice__time">{loading ? "…" : clock(payload.duration)}</span>
           <audio
             ref={audio}

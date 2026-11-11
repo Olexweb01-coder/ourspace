@@ -360,3 +360,12 @@ alter table messages add column if not exists edited_at timestamptz;
 -- ===== Notification choices (same as db/013_notification_choices.sql) =====
 alter table members add column if not exists notify_off text[] not null default '{}';
 alter table members add column if not exists notify_quiet boolean not null default false;
+
+-- ===== Deleting messages (same as db/014_delete_messages.sql) =====
+alter table messages add column if not exists deleted_reason text;   -- 'removed' = deleted for everyone by the sender
+create table if not exists hidden_messages (                          -- "delete for me"
+  member_id   uuid   not null references members(id) on delete cascade,
+  message_id  bigint not null references messages(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  primary key (member_id, message_id)
+);

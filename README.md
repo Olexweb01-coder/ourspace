@@ -141,6 +141,18 @@ Setup: run `db/011_sign_in_guard.sql` once in Neon.
 - **Status styles:** five fonts and fourteen colours for text statuses.
 Setup: run `db/012_edit_messages.sql` and `db/013_notification_choices.sql` once in Neon.
 
+## Deleting, view once, app lock on the phone
+- **Delete:** long-press, Delete. "Delete for me" hides it on your devices; "Delete for everyone" (your own messages)
+  wipes it and removes any file from storage; the other person sees "This message was deleted".
+- **View once:** photos and videos open a preview first, with a caption and a view-once switch. Opening a view-once
+  photo or video deletes the file from storage immediately.
+- **App lock v2:** the PIN, pattern or password opens a key stored only on this phone: no internet, instant.
+  5 wrong tries wipe it (then the shared password). Older locks move onto the phone on their next use.
+  "Lock now" locks the phone only; an expired server connection is renewed quietly in the background.
+- **Notifications:** opening a space clears its notifications; tapping one opens its space.
+- **Which space opens:** the most recently used one (a switch sticks); a notification opens its own space.
+Setup: run `db/014_delete_messages.sql` once in Neon.
+
 ## Layers and computer layout
 On a computer (960px and wider) the side panel stays open, so pages and sheets open in the chat area beside it and
 only one page is open at a time. Full-screen moments (celebrations, photo viewer, view once, statuses, live games)

@@ -125,3 +125,23 @@ export async function decryptJSON<T>(key: CryptoKey, ivB64: string, ctB64: strin
 export function messageAad(spaceId: string, senderId: string): string {
   return `msg:${spaceId}:${senderId}`;
 }
+
+// ---- App lock v2: works entirely on the phone (no internet). ----
+async function localLockKey(lock: string, saltB64: string): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey("raw", te.encode(lock.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: fromB64(saltB64), iterations: LOCK_ITERATIONS, hash: "SHA-256" }, base, 256));
+  const hkdf = await crypto.subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: te.encode("ourspace/applock/v2") },
+    hkdf, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+export async function sealMasterLocal(master: Uint8Array<ArrayBuffer>, lock: string, saltB64: string) {
+  const key = await localLockKey(lock, saltB64);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  return { iv: toB64(iv), ct: toB64(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, master)) };
+}
+/** Throws if the lock is wrong (the sealed key won't open). */
+export async function openMasterLocal(sealed: { iv: string; ct: string }, lock: string, saltB64: string) {
+  const key = await localLockKey(lock, saltB64);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(sealed.iv) }, key, fromB64(sealed.ct)));
+}

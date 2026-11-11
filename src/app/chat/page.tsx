@@ -29,7 +29,7 @@ import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
 import { getLock, LOCK_LABEL, removeLock, type LockKind } from "@/lib/applock";
 import { APP_NAME } from "@/lib/brand";
-import { decryptJSON, encryptJSON, messageAad } from "@/lib/crypto-client";
+import { decryptJSON, encryptJSON, keysFromMaster, messageAad } from "@/lib/crypto-client";
 import { ANGRY, LOVE, onlyLoveAndAngry } from "@/lib/emoji";
 import { dayLabel, initial, isOnline, sinceLabel, timeOf } from "@/lib/format";
 import { personalizeInstall } from "@/lib/install";
@@ -39,7 +39,7 @@ import {
 import { MAX_BYTES, type Theme } from "@/lib/media-limits";
 import { ageOn, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle, type CycleData, type DayKind } from "@/lib/planner";
 import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from "@/lib/rituals";
-import { enableNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
+import { enableNotifications, clearSpaceNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, savedSpaces, type Vault } from "@/lib/vault";
 
 type Reaction = string;   // "love", "angry", or any single emoji
@@ -55,6 +55,7 @@ type Member = {
 type Msg = {
   id: string; senderId: string; kind: string; viewOnce: boolean; viewedAt: string | null; deleted: boolean;
   reactions: Record<string, Reaction>; expiresAt: string | null; createdAt: string; editedAt?: string | null; iv: string | null; ct: string | null;
+  deletedReason?: string | null; hidden?: boolean;
   media: MediaState;
 };
 type Space = { label: string; disappearSeconds: number | null; theme: Theme; backgroundMediaId: string | null };
@@ -218,8 +219,31 @@ export default function ChatPage() {
     setReady(true);
     setLockKind(getLock(v.spaceId)?.kind ?? null);
     setCanSwitch(savedSpaces().length > 1);
+    void clearSpaceNotifications(v.spaceId);
     void reportNotificationState().then(setNotif);
   }, [router]);
+
+  // Signs in again in the background using the unlocked key; only if that fails do we ask for the password.
+  const reconnecting = useRef<Promise<"ok" | "later" | "locked"> | null>(null);
+  const reconnect = useCallback(async (): Promise<"ok" | "later" | "locked"> => {
+    const v = vaultRef.current;
+    if (!v) return "locked";
+    if (!reconnecting.current) {
+      reconnecting.current = (async () => {
+        try {
+          const keys = await keysFromMaster(v.master);
+          await api("/api/auth/login", { body: { spaceId: v.spaceId, memberId: v.memberId, authToken: keys.authToken, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } });
+          return "ok";
+        } catch (err) {
+          // Weak or no network: try again at the next regular check. A real refusal: ask for the password.
+          return err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404) ? "locked" : "later";
+        } finally {
+          reconnecting.current = null;
+        }
+      })();
+    }
+    return reconnecting.current;
+  }, []);
 
   // ---------- decryption ----------
   const decryptList = useCallback(async (list: Msg[]) => {
@@ -316,18 +340,22 @@ export default function ChatPage() {
       if (data.messages.length) {
         setMsgs((prev) => {
           const next = new Map(prev);
-          for (const m of data.messages) next.set(m.id, m);
+          for (const m of data.messages) { if (m.hidden) next.delete(m.id); else next.set(m.id, m); }
           return next;
         });
         await decryptList(data.messages);
       }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) lockOut();
+      if (err instanceof ApiError && err.status === 401) {
+        // The server connection expired (or "Lock now" was used): renew it quietly with the key already in memory.
+        const r = await reconnect();
+        if (r === "ok") syncAgain.current = true; else if (r === "locked") lockOut();   // "later": the next check retries
+      }
     } finally {
       syncing.current = false;
       if (syncAgain.current) { syncAgain.current = false; void syncNow(); }
     }
-  }, [decryptList, decryptMoods, decryptPlans, decryptStatuses, lockOut]);
+  }, [decryptList, decryptMoods, decryptPlans, decryptStatuses, lockOut, reconnect]);
 
   useEffect(() => {
     if (!ready) return;
@@ -340,6 +368,7 @@ export default function ChatPage() {
       } else {
         if (hiddenAt.current && Date.now() - hiddenAt.current > LOCK_AFTER_MS) return lockOut();
         hiddenAt.current = null;
+        if (vaultRef.current) void clearSpaceNotifications(vaultRef.current.spaceId);   // back in the chat: its notifications go
         void syncNow();
       }
     };
@@ -458,7 +487,7 @@ export default function ChatPage() {
     const now = Date.now();
     return Array.from(msgs.values())
       // Show live messages, plus opened view-once markers. Hide anything past its disappear time.
-      .filter((m) => (!m.deleted || (m.viewOnce && !!m.viewedAt)) && !(m.expiresAt && !m.deleted && new Date(m.expiresAt).getTime() < now))
+      .filter((m) => (!m.deleted || (m.viewOnce && !!m.viewedAt) || m.deletedReason === "removed") && !(m.expiresAt && !m.deleted && new Date(m.expiresAt).getTime() < now))
       .sort((a, b) => Number(a.id) - Number(b.id));
   }, [msgs]);
 
@@ -524,18 +553,20 @@ export default function ChatPage() {
   }
 
   /** Encrypts, uploads with a progress bar, then sends the message that points to it. */
-  async function sendMedia(label: string, bytes: ArrayBuffer, build: (mediaId: string, caption?: string) => MediaPayload) {
+  async function sendMedia(label: string, bytes: ArrayBuffer, build: (mediaId: string, caption?: string) => MediaPayload,
+                           opts?: { caption?: string; once?: boolean }) {
     const v = vaultRef.current;
     if (!v) return;
-    const caption = onlyLoveAndAngry(draft).trim() || undefined;
+    const fromPreview = opts !== undefined;
+    const caption = (fromPreview ? opts!.caption ?? "" : onlyLoveAndAngry(draft)).trim() || undefined;
     const job: Upload = { id: crypto.randomUUID(), label, pct: 0 };
     setUploads((u) => [...u, job]);
     atBottom.current = true;
     try {
       const mediaId = await uploadEncrypted(v, bytes, "message", (pct) =>
         setUploads((u) => u.map((x) => (x.id === job.id ? { ...x, pct } : x))));
-      await postMessage(build(mediaId, caption), mediaId);
-      if (caption) setDraft("");
+      await postMessage(build(mediaId, caption), mediaId, fromPreview ? !!opts!.once : viewOnce);
+      if (caption && !fromPreview) setDraft("");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return lockOut();
       setToast((err as Error).message || `${label} didn't send. Try again.`);
@@ -544,23 +575,52 @@ export default function ChatPage() {
     }
   }
 
+  // ---------- the send preview: caption and view once before a photo or video goes ----------
+  const [pending, setPending] = useState<{ kind: "photo" | "video"; files: File[]; urls: string[] } | null>(null);
+  const [pendingCaption, setPendingCaption] = useState("");
+  const [pendingOnce, setPendingOnce] = useState(false);
+  function openPreview(kind: "photo" | "video", files: File[]) {
+    if (files.length === 0) return;
+    setPending({ kind, files, urls: files.map((f) => URL.createObjectURL(f)) });
+    setPendingCaption(onlyLoveAndAngry(draft));
+    setPendingOnce(viewOnce);
+  }
+  function closePreview() {
+    pending?.urls.forEach((u) => URL.revokeObjectURL(u));
+    setPending(null);
+  }
+  async function sendPreview() {
+    if (!pending) return;
+    const { kind, files } = pending;
+    const opts = { caption: pendingCaption, once: pendingOnce };
+    closePreview();
+    if (pendingCaption.trim() && pendingCaption === onlyLoveAndAngry(draft)) setDraft("");
+    setViewOnce(false);
+    if (kind === "photo") await sendPhotos(files, opts); else await sendVideo(files[0], opts);
+  }
+
   async function onPhotos(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
+    const files = Array.from(e.target.files ?? []).slice(0, 10);
     e.target.value = "";
     setAttachOpen(false);
-    for (const file of files.slice(0, 10)) {
+    openPreview("photo", files);
+  }
+
+  async function sendPhotos(files: File[], opts: { caption?: string; once?: boolean }) {
+    for (const [i, file] of files.entries()) {
+      const o = { ...opts, caption: i === 0 ? opts.caption : undefined };   // the caption goes with the first photo
       try {
         if (file.type === "image/gif" && file.size <= 8 * 1024 * 1024) {
           const bmp = await createImageBitmap(file);
           const dims = { w: bmp.width, h: bmp.height };
           bmp.close();
           await sendMedia("Photo", await file.arrayBuffer(), (mediaId, caption) =>
-            ({ t: "photo", mediaId, mime: "image/gif", ...dims, size: file.size, caption }));
+            ({ t: "photo", mediaId, mime: "image/gif", ...dims, size: file.size, caption }), o);
           continue;
         }
         const img = await compressImage(file, 1600);
         await sendMedia("Photo", img.bytes, (mediaId, caption) =>
-          ({ t: "photo", mediaId, mime: "image/jpeg", w: img.w, h: img.h, thumb: img.thumb, size: img.bytes.byteLength, caption }));
+          ({ t: "photo", mediaId, mime: "image/jpeg", w: img.w, h: img.h, thumb: img.thumb, size: img.bytes.byteLength, caption }), o);
       } catch {
         // A format this phone can't draw (e.g. some HEIC files): send it as a file instead.
         await sendFile(file);
@@ -574,8 +634,11 @@ export default function ChatPage() {
     setAttachOpen(false);
     if (!file) return;
     if (file.size > MAX_BYTES.message) return setToast(`Videos can be up to ${formatBytes(MAX_BYTES.message)}. Trim it and try again.`);
+    openPreview("video", [file]);
+  }
+  async function sendVideo(file: File, opts: { caption?: string; once?: boolean }) {
     await sendMedia("Video", await file.arrayBuffer(), (mediaId, caption) =>
-      ({ t: "video", mediaId, mime: file.type || "video/mp4", name: file.name || "video.mp4", size: file.size, caption }));
+      ({ t: "video", mediaId, mime: file.type || "video/mp4", name: file.name || "video.mp4", size: file.size, caption }), opts);
   }
 
   async function sendFile(file: File) {
@@ -734,14 +797,22 @@ export default function ChatPage() {
     const v = vaultRef.current;
     if (!file || !v) return;
     setBusySetting("avatar");
+    // Each step says what went wrong, so a failure on one phone can be traced.
+    let step: "read" | "upload" | "save" = "read";
     try {
       const img = await compressImage(file, 512, 0.85);
+      step = "upload";
       const mediaId = await uploadEncrypted(v, img.bytes, "avatar");
+      step = "save";
       await api("/api/profile", { body: { avatarMediaId: mediaId } });
       await syncNow();
       setToast("Your photo is in the circles now");
     } catch (err) {
-      setToast((err as Error).message || "Couldn't update your photo.");
+      const why = (err as Error)?.message;
+      setToast(
+        step === "read" ? `This phone couldn't open that photo${/heic|heif/i.test(file.type + file.name) ? " (HEIC format)" : ""}. Try a screenshot of it, or another photo.`
+        : step === "upload" ? `The photo didn't upload${why ? `: ${why}` : ""}. Check your connection and try again.`
+        : `The photo uploaded but didn't save${why ? `: ${why}` : ""}. Try again.`);
     } finally {
       setBusySetting(null);
     }
@@ -795,8 +866,8 @@ export default function ChatPage() {
     }
   }
 
-  async function lockNow() {
-    await api("/api/auth/logout", { method: "POST" }).catch(() => {});
+  // Locks this phone. Opening again needs your lock or the shared password; nothing can be read without it.
+  function lockNow() {
     lockOut();
   }
 
@@ -908,6 +979,29 @@ export default function ChatPage() {
     setEditing(null);
     setDraft("");
     void syncNow();
+  }
+
+  // ---------- deleting ----------
+  const [deleting, setDeleting] = useState<Msg | null>(null);
+  async function deleteMessage(m: Msg, who: "me" | "everyone") {
+    setDeleting(null);
+    setMenuFor(null);
+    const before = msgs.get(m.id);
+    // On screen right away; the server catches up (and is retried by the next sync if the network is weak).
+    setMsgs((prev) => {
+      const next = new Map(prev);
+      if (who === "me") next.delete(m.id);
+      else next.set(m.id, { ...m, deleted: true, deletedReason: "removed", iv: "", ct: "", reactions: {}, media: null });
+      return next;
+    });
+    if (who === "everyone") { payloads.current.delete(m.id); payloadIv.current.delete(m.id); }
+    try {
+      await api(`/api/messages/${m.id}/delete`, { body: { for: who } });
+    } catch (err) {
+      if (before) setMsgs((prev) => new Map(prev).set(m.id, before));
+      if (err instanceof ApiError && err.status === 401) return lockOut();
+      setToast(err instanceof ApiError ? err.message : "Couldn't delete that. Check your connection and try again.");
+    }
   }
 
   function startReply(m: Msg) {
@@ -1190,13 +1284,18 @@ export default function ChatPage() {
                   reactions={Object.values(m.reactions)}
                   highlighted={flash === m.id}
                   wide={isMedia}
-                  canReply={!m.viewOnce && !!partner}
+                  canReply={!m.viewOnce && !!partner && m.deletedReason !== "removed"}
                   onReply={() => startReply(m)}
                   onMenu={(rect) => setMenuFor({ m, rect })}
-                  onLove={() => { if (!m.viewOnce) void react(m, "love"); }}
+                  onLove={() => { if (!m.viewOnce && m.deletedReason !== "removed") void react(m, "love"); }}
                   onJump={jumpTo}
                 >
-                  {m.viewOnce ? (
+                  {m.deletedReason === "removed" ? (
+                    <span className="b__deleted">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM4 12a8 8 0 0 1 12.9-6.3L5.7 16.9A7.96 7.96 0 0 1 4 12zm8 8a7.96 7.96 0 0 1-4.9-1.7L18.3 7.1A8 8 0 0 1 12 20z" /></svg>
+                      {mine ? "You deleted this message" : "This message was deleted"}
+                    </span>
+                  ) : m.viewOnce ? (
                     mine ? <span className="b__once">{m.deleted || m.viewedAt ? "Opened" : `${noun}, view once`}</span>
                       : m.deleted || m.viewedAt ? <span className="b__once">Viewed</span>
                       : <button type="button" className="b__sealed" onClick={() => openOnce(m)}>{noun} to see once. Tap to open.</button>
@@ -1288,7 +1387,7 @@ export default function ChatPage() {
         <MessageMenu
           rect={menuFor.rect}
           mine={menuFor.m.senderId === me.id}
-          canReact={!menuFor.m.viewOnce}
+          canReact={!menuFor.m.viewOnce && menuFor.m.deletedReason !== "removed"}
           canCopy={payloads.current.get(menuFor.m.id)?.t === "text" && !menuFor.m.viewOnce}
           myReaction={menuFor.m.reactions[me.id] ?? null}
           onReact={(r) => react(menuFor.m, r)}
@@ -1296,6 +1395,7 @@ export default function ChatPage() {
           onCopy={() => copyMessage(menuFor.m)}
           canEdit={canEdit(menuFor.m)}
           onEdit={() => startEdit(menuFor.m)}
+          onDelete={() => { setDeleting(menuFor.m); setMenuFor(null); }}
           onClose={() => setMenuFor(null)}
         />
       )}
@@ -1464,6 +1564,51 @@ export default function ChatPage() {
         <NotifPrompt partnerName={partnerName} partnerPossessive={p.pos} needsHomeScreen={isIOS() && !isStandalone()}
           onTurnOn={async () => { await turnOnNotifications(); setNotifPrompt(false); }}
           onNotNow={() => { setNotifPrompt(false); void api("/api/push/status", { body: { state: "off" } }).catch(() => {}); }} />
+      )}
+      {pending && (
+        <div className="sendprev" role="dialog" aria-modal="true" aria-label={pending.kind === "photo" ? "Send photo" : "Send video"}>
+          <header className="sendprev__top">
+            <button type="button" className="icon-btn" onClick={closePreview} aria-label="Cancel">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z" /></svg>
+            </button>
+            <span>{pending.files.length > 1 ? `${pending.files.length} photos` : pending.kind === "photo" ? "Photo" : "Video"} for {partnerName}</span>
+            <span style={{ width: 40 }} />
+          </header>
+          <div className="sendprev__media">
+            {pending.kind === "photo"
+              ? <img src={pending.urls[0]} alt="Photo to send" />
+              : <video src={pending.urls[0]} controls playsInline />}
+          </div>
+          {pending.files.length > 1 && (
+            <div className="sendprev__thumbs">
+              {pending.urls.map((u, i) => <img key={u} src={u} alt={`Photo ${i + 1}`} />)}
+            </div>
+          )}
+          <div className="sendprev__bar">
+            <button type="button" className={pendingOnce ? "sendprev__once sendprev__once--on" : "sendprev__once"} onClick={() => setPendingOnce((o) => !o)}
+              aria-pressed={pendingOnce} aria-label={pendingOnce ? "View once is on" : "Turn on view once"}>1</button>
+            <input className="field" value={pendingCaption} maxLength={1000} placeholder="Add a caption" onChange={(e) => setPendingCaption(e.target.value)} />
+            <button type="button" className="send" onClick={sendPreview} aria-label="Send">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 20.4 21 12 3.4 3.6 3.3 10l12.6 2-12.6 2z" /></svg>
+            </button>
+          </div>
+          {pendingOnce && <p className="sendprev__hint">View once: {partnerName} can open it one time, then it&apos;s deleted for good.</p>}
+        </div>
+      )}
+      {deleting && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Delete message" onClick={() => setDeleting(null)}>
+          <div className="sheet-up glass delsheet" onClick={(e) => e.stopPropagation()}>
+            <p className="sheet__title">Delete message?</p>
+            {deleting.senderId === me.id && deleting.deletedReason !== "removed" && (
+              <button type="button" className="btn btn--danger btn--wide" onClick={() => deleteMessage(deleting, "everyone")}>Delete for everyone</button>
+            )}
+            <button type="button" className="btn btn--ghost btn--wide" onClick={() => deleteMessage(deleting, "me")}>Delete for me</button>
+            <button type="button" className="link-btn link-btn--quiet" onClick={() => setDeleting(null)}>Cancel</button>
+            {deleting.senderId === me.id && deleting.deletedReason !== "removed" && (
+              <p className="hint">Delete for everyone removes it from both phones{deleting.media ? ", and the file from storage" : ""}. {partnerName} will see &quot;This message was deleted&quot;.</p>
+            )}
+          </div>
+        </div>
       )}
       {switchOpen && <SpaceSwitcher currentSpaceId={me.spaceId} isHost={me.role === "host"} onClose={() => setSwitchOpen(false)} />}
       {aboutOpen && (

@@ -6,7 +6,7 @@ import LockInput from "@/components/LockInput";
 import LockSetup from "@/components/LockSetup";
 import SignIn from "@/components/SignIn";
 import { api, ApiError } from "@/lib/api";
-import { getLock, LockReset, lockSkipped, skipLock, unlockWithLock } from "@/lib/applock";
+import { getLock, LockReset, LockWrong, lockSkipped, skipLock, unlockWithLock } from "@/lib/applock";
 import { APP_NAME } from "@/lib/brand";
 import { deriveKeys, type DerivedKeys } from "@/lib/crypto-client";
 import { initial } from "@/lib/format";
@@ -40,18 +40,26 @@ export default function UnlockPage() {
     const s = params.get("s");
     const m = params.get("m");
     let list = savedSpaces();
-    if (s && m && UUID.test(s) && UUID.test(m)) {
-      const known = list.find((x) => x.spaceId === s);
-      if (!known || known.memberId !== m) {
-        rememberSpace({ spaceId: s, memberId: m, label: known?.label ?? "", myName: known?.myName ?? "" });
-        list = savedSpaces();
-      }
+    // Which space opens:
+    // - from a notification (from=n), or a link to a space this phone doesn't know yet: that space;
+    // - otherwise (e.g. the Home Screen icon): the space you used most recently, so a switch sticks.
+    //   The icon's address only matters on a fresh install (an iPhone Home Screen app starts with empty memory).
+    const valid = !!(s && m && UUID.test(s) && UUID.test(m));
+    const known = valid ? list.find((x) => x.spaceId === s) : undefined;
+    const fromNotification = params.get("from") === "n";
+    if (valid && (!known || known.memberId !== m) && (fromNotification || list.length === 0 || !known)) {
+      rememberSpace({ spaceId: s!, memberId: m!, label: known?.label ?? "", myName: known?.myName ?? "" });
+      list = savedSpaces();
     }
     setSpaces(list);
-    choose(list.find((x) => x.spaceId === s) ?? list[0] ?? null);
+    const wanted = valid && (fromNotification || !known) ? list.find((x) => x.spaceId === s) : undefined;
+    choose(wanted ?? list[0] ?? null);
     if (params.get("another") === "1") setAnother(true);
     // Forget spaces this phone remembers that no longer exist (e.g. after a reset), so nothing stale shows.
-    void Promise.all(list.map(async (x) => {
+    // At most once a day, in the background: opening the app never waits on the network for this.
+    let lastCheck = 0;
+    try { lastCheck = Number(localStorage.getItem("ourspace:spacecheck") || 0); localStorage.setItem("ourspace:spacecheck", String(Date.now())); } catch { /* ignore */ }
+    if (Date.now() - lastCheck > 86_400_000) void Promise.all(list.map(async (x) => {
       try { await api(`/api/auth/salt?spaceId=${x.spaceId}`); return true; }
       catch (err) { if (err instanceof ApiError && err.status === 404) { forgetSpace(x.spaceId); return false; } return true; }
     })).then((alive) => {
@@ -105,10 +113,12 @@ export default function UnlockPage() {
     setBusy(true);
     setError(null);
     try {
+      // All on this phone: no internet. The chat reconnects to the server by itself once it's open.
       const { keys } = await unlockWithLock(current.spaceId, value);
-      await finish(keys, current, false);
+      opened(keys, current, false);
     } catch (err) {
       if (err instanceof LockReset) { setMode("password"); setError(err.message); }
+      else if (err instanceof LockWrong) setError(err.message);
       else setError(err instanceof ApiError ? err.message : "Couldn't reach your space. Check your connection and try again.");
       setBusy(false);
     }

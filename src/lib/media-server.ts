@@ -36,3 +36,12 @@ export async function deleteBlobs(pathnames: string[]): Promise<void> {
     if (chunk.length) await del(chunk);
   }
 }
+
+/** Removes a message's photo, video, voice note or file from storage right away (view once opened, or deleted for everyone). */
+export async function removeMessageMedia(messageId: string): Promise<void> {
+  const sql = db();
+  const rows = await sql`select id, pathname from media where message_id = ${messageId}::bigint`;
+  if (rows.length === 0) return;
+  await deleteBlobs(rows.map((r) => r.pathname as string));
+  await sql`delete from media where id = any(${rows.map((r) => r.id as string)}::uuid[])`;
+}

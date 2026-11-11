@@ -138,11 +138,12 @@ type MenuProps = {
   onCopy: () => void;
   canEdit?: boolean;
   onEdit?: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 };
 
 // The long-press menu: love or angry, reply, copy.
-export function MessageMenu({ rect, mine, canReact, canCopy, myReaction, onReact, onReply, onCopy, canEdit, onEdit, onClose }: MenuProps) {
+export function MessageMenu({ rect, mine, canReact, canCopy, myReaction, onReact, onReply, onCopy, canEdit, onEdit, onDelete, onClose }: MenuProps) {
   const [more, setMore] = useMenuState(false);
   const top = Math.max(76, Math.min(rect.top - 64, (typeof window !== "undefined" ? window.innerHeight : 800) - 220));
   // Keep the whole menu (330px wide) on screen, on whichever side the message is.
@@ -182,6 +183,11 @@ export function MessageMenu({ rect, mine, canReact, canCopy, myReaction, onReact
         {canCopy && (
           <button type="button" className="mmenu__item" role="menuitem" onClick={onCopy}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11z" /></svg>Copy
+          </button>
+        )}
+        {onDelete && (
+          <button type="button" className="mmenu__item mmenu__item--danger" role="menuitem" onClick={onDelete}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z" /></svg>Delete
           </button>
         )}
       </div>

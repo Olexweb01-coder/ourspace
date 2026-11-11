@@ -67,3 +67,16 @@ export async function reportNotificationState(): Promise<"on" | "off" | "unknown
   await api("/api/push/subscribe", { body: { subscription: sub.toJSON() } }).catch(() => {});
   return "on";
 }
+
+/** Opening a space clears its notifications from the phone (and older ones that don't say which space). */
+export async function clearSpaceNotifications(spaceId: string): Promise<void> {
+  try {
+    if (!("serviceWorker" in navigator)) return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    const list = (await reg?.getNotifications()) ?? [];
+    for (const n of list) {
+      const space = (n.data as { space?: string | null } | null)?.space;
+      if (!space || space === spaceId) n.close();
+    }
+  } catch { /* not available on this browser */ }
+}

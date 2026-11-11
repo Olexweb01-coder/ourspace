@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 type Props = {
   kind: "photo" | "video" | "voice";
@@ -17,8 +18,12 @@ export default function MediaViewer({ kind, url, caption, onClose, actions, clos
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  // Drawn at the top of the page, not inside the message list, so nothing (header, message box, side panel) can cover it.
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => setHost(document.body), []);
+  if (!host) return null;
 
-  return (
+  return createPortal(
     <div className="viewer" role="dialog" aria-modal="true" aria-label={kind === "photo" ? "Photo" : kind === "video" ? "Video" : "Voice note"}>
       <div className="viewer__stage">
         {kind === "photo" && <img src={url} alt={caption || "Photo"} className="viewer__media" />}
@@ -30,6 +35,7 @@ export default function MediaViewer({ kind, url, caption, onClose, actions, clos
         {actions}
         <button type="button" className="btn" onClick={onClose}>{closeLabel}</button>
       </div>
-    </div>
+    </div>,
+    host,
   );
 }

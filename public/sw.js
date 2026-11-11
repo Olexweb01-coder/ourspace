@@ -40,7 +40,7 @@ self.addEventListener("push", (event) => {
     windows.forEach((c) => c.postMessage({ type: "push", tag: data.tag || null }));
     await self.registration.showNotification(title, {
       body: data.body || "",
-      tag: data.tag || "ourspace",
+      tag: (data.space ? data.space.slice(0, 8) + ":" : "") + (data.tag || "ourspace"),   // per space, so spaces never replace each other
       renotify: true,
       // A nudge is a call to come online: it stays on screen until tapped and buzzes like a heartbeat
       // (Android/desktop; iPhone shows it on the lock screen with its normal sound).
@@ -48,7 +48,7 @@ self.addEventListener("push", (event) => {
       vibrate: isNudge ? [120, 90, 120, 600, 120, 90, 120] : [80],
       icon: "/icons/icon-192.png",
       badge: "/icons/badge-96.png",
-      data: { url: data.url || "/" },
+      data: { url: data.url || "/", space: data.space || null },
     });
   })());
 });

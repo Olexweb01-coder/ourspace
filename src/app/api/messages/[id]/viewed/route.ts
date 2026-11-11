@@ -1,10 +1,11 @@
 import { after } from "next/server";
 import { db } from "@/lib/db";
+import { removeMessageMedia } from "@/lib/media-server";
 import { pushTo } from "@/lib/push";
 import { fail, json } from "@/lib/server-utils";
 import { getMe } from "@/lib/session";
 
-// The receiver opened a view-once message: the ciphertext is wiped from the server for good.
+// The receiver opened a view-once message: the ciphertext is wiped, and any photo or video is deleted right away.
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const me = await getMe();
   if (!me) return fail("Locked", 401);
@@ -17,6 +18,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
       and sender_id <> ${me.memberId} and deleted = false
     returning sender_id`;
   if (rows[0]) {
+    after(() => removeMessageMedia(id));
     after(() => pushTo(rows[0].sender_id, { title: `👀 ${me.name}`, body: "Opened your view-once message.", tag: "viewed" }));
   }
   return json({ ok: true });

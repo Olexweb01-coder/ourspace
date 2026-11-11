@@ -21,7 +21,8 @@ export async function GET(req: Request) {
     since
       // 3s overlap so commits that raced the last cursor are never missed; client de-dupes by id.
       ? sql`select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
-              msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.media_id,
+              msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.deleted_reason,
+              exists (select 1 from hidden_messages h where h.message_id = msg.id and h.member_id = ${me.memberId}) as hidden_for_me, msg.media_id,
               case when msg.deleted then null else msg.iv end as iv,
               case when msg.deleted then null else msg.ciphertext end as ciphertext,
               md.kept_by as media_kept_by, md.expires_at as media_expires_at,
@@ -32,7 +33,8 @@ export async function GET(req: Request) {
             order by msg.updated_at asc limit 500`
       : sql`select * from (
               select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
-                msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.media_id,
+                msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.deleted_reason,
+              exists (select 1 from hidden_messages h where h.message_id = msg.id and h.member_id = ${me.memberId}) as hidden_for_me, msg.media_id,
                 case when msg.deleted then null else msg.iv end as iv,
                 case when msg.deleted then null else msg.ciphertext end as ciphertext,
                 md.kept_by as media_kept_by, md.expires_at as media_expires_at,
@@ -127,6 +129,8 @@ export async function GET(req: Request) {
       expiresAt: r.expires_at,
       createdAt: r.created_at,
       editedAt: r.edited_at ?? null,
+      deletedReason: r.deleted_reason ?? null,
+      hidden: r.hidden_for_me === true,
       iv: r.iv,
       ct: r.ciphertext,
       media: r.media_id

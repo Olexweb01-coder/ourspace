@@ -24,7 +24,8 @@ function PinPad({ length, busy, submitLabel, onSubmit }: { length?: number; busy
     if (busy || pin.length >= max) return;
     const next = pin + d;
     setPin(next);
-    if (length && next.length === length) { onSubmit(next); setTimeout(() => setPin(""), 250); }
+    // Clear straight away: a delayed clear would swallow the first digit of a quick retry after a typo.
+    if (length && next.length === length) { setPin(""); onSubmit(next); }
   }
   return (
     <div className="pin">

@@ -1,9 +1,10 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import AboutYou from "@/components/AboutYou";
 import BondMark from "@/components/BondMark";
-import LiveGame from "@/components/live/LiveGame";
+
 import { pron, type Gender } from "@/lib/pronouns";
 import Composer from "@/components/chat/Composer";
 import Drawer, { DrawerItem } from "@/components/chat/Drawer";
@@ -81,6 +82,9 @@ type Payload = (TextPayload | MediaPayload) & { reply?: ReplyRef };
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
 type Upload = { id: string; label: string; pct: number };
 type OnceView = { kind: "text"; text: string } | { kind: "photo" | "video" | "voice"; url: string; mediaId: string; caption?: string };
+
+// The game tables (and the 3D library) load only when you open a game.
+const LiveGame = dynamic(() => import("@/components/live/LiveGame"), { ssr: false });
 
 const POLL_MS = 2500;
 const LOCK_AFTER_MS = 2 * 60 * 1000;
@@ -1359,7 +1363,7 @@ export default function ChatPage() {
       )}
 
       {liveOpen && (
-        <LiveGame kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} />
+        <LiveGame vault={vault} kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} />
       )}
       {aboutOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="About you" onClick={() => setAboutOpen(false)}>

@@ -18,8 +18,27 @@ export function fullDeck(): Card[] {
 const SPECIAL = new Set([1, 2, 5, 8, 14, 20]);
 export const CARD_NAME: Record<number, string> = { 1: "Hold on", 2: "Pick two", 5: "Pick three", 8: "Suspension", 14: "General market", 20: "Whot" };
 
+export type WhotRules = {
+  hand: 4 | 5 | 6;           // cards dealt to each player
+  pickThree: boolean;        // 5 = pick three
+  stack: boolean;            // a 2 can answer a 2, a 5 a 5
+  generalMarket: boolean;    // 14 = everyone else takes one
+  holdOn: boolean;           // 1 = play again
+  suspension: boolean;       // 8 = skip the other player
+  fast: boolean;             // nothing to play? go to market automatically
+};
+export const DEFAULT_WHOT: WhotRules = { hand: 6, pickThree: true, stack: true, generalMarket: true, holdOn: true, suspension: true, fast: false };
+export function cleanWhotRules(r: Partial<WhotRules> | null | undefined): WhotRules {
+  const hand = r?.hand === 4 || r?.hand === 5 ? r.hand : 6;
+  return {
+    hand, pickThree: r?.pickThree !== false, stack: r?.stack !== false, generalMarket: r?.generalMarket !== false,
+    holdOn: r?.holdOn !== false, suspension: r?.suspension !== false, fast: r?.fast === true,
+  };
+}
+
 export type WhotState = {
   kind: "whot";
+  rules?: WhotRules;
   players: string[];
   hands: Record<string, Card[]>;
   deck: Card[];
@@ -38,20 +57,22 @@ type Shuffle = (cards: Card[]) => Card[];
 const other = (s: WhotState, id: string) => s.players.find((p) => p !== id)!;
 export const cardValue = (c: Card) => (c.s === "star" ? c.n * 2 : c.n);
 
-export function initWhot(a: string, b: string, starter: string, shuffle: Shuffle): WhotState {
+export function initWhot(a: string, b: string, starter: string, shuffle: Shuffle, rules: WhotRules = DEFAULT_WHOT): WhotState {
   const deck = shuffle(fullDeck());
-  const hands = { [a]: deck.splice(0, 6), [b]: deck.splice(0, 6) };
+  const hands = { [a]: deck.splice(0, rules.hand), [b]: deck.splice(0, rules.hand) };
   // The first face-up card is always a plain number card.
   let i = deck.findIndex((c) => !SPECIAL.has(c.n));
   if (i < 0) i = 0;
   const [first] = deck.splice(i, 1);
-  return { kind: "whot", players: [a, b], hands, deck, pile: [first], turn: starter, call: null, pending: null,
+  return { kind: "whot", rules, players: [a, b], hands, deck, pile: [first], turn: starter, call: null, pending: null,
     winner: null, ended: null, totals: null, last: "Cards dealt. Match the shape or the number.", moves: 0 };
 }
 
+const whotRules = (s: WhotState) => s.rules ?? DEFAULT_WHOT;
+
 export function canPlay(s: WhotState, c: Card): boolean {
   const top = s.pile[s.pile.length - 1];
-  if (s.pending) return c.n === s.pending.by;          // only another 2 on a 2, or 5 on a 5
+  if (s.pending) return whotRules(s).stack && c.n === s.pending.by;   // answer a 2 with a 2 (if stacking is on)
   if (c.s === "whot") return true;
   if (s.call) return c.s === s.call;
   return c.s === top.s || c.n === top.n;
@@ -89,7 +110,7 @@ export function whotPlay(s: WhotState, id: string, index: number, call: string |
   const hand = s.hands[id];
   const card = hand[index];
   if (!card) throw new Error("That card isn't in your hand.");
-  if (!canPlay(s, card)) throw new Error(s.pending ? `Play a ${s.pending.by} or go to market.` : s.call ? `They asked for ${s.call}.` : "Match the shape or the number.");
+  if (!canPlay(s, card)) throw new Error(s.pending ? (whotRules(s).stack ? `Play a ${s.pending.by} or go to market.` : `Go to market and pick ${s.pending.count}.`) : s.call ? `They asked for ${s.call}.` : "Match the shape or the number.");
   if (card.n === 20 && !CALLABLE.includes(call as Exclude<Shape, "whot">)) throw new Error("Choose a shape to ask for.");
 
   const opp = other(s, id);
@@ -103,6 +124,9 @@ export function whotPlay(s: WhotState, id: string, index: number, call: string |
   if (n.hands[id].length === 0) return { ...n, pending: null, winner: id, ended: "empty", last: "Check up! Won the game." };
   const lastCard = n.hands[id].length === 1 ? " Last card!" : "";
 
+  const r = whotRules(s);
+  const plain = { ...n, turn: opp, pending: null, last: `Played ${card.n} ${card.s}.${lastCard}` };
+  if ((card.n === 1 && !r.holdOn) || (card.n === 8 && !r.suspension) || (card.n === 14 && !r.generalMarket) || (card.n === 5 && !r.pickThree)) return plain;
   switch (card.n) {
     case 20: return { ...n, call: call as Exclude<Shape, "whot">, turn: opp, pending: null, last: `Whot! Asked for ${call}.${lastCard}` };
     case 1: return { ...n, turn: id, last: `Hold on. Play again.${lastCard}` };

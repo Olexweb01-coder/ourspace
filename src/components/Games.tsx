@@ -8,6 +8,10 @@ import {
   type DeckKind, type GameKind,
 } from "@/lib/games-bank";
 import type { Vault } from "@/lib/vault";
+import { betAad } from "@/lib/live/bets";
+
+type DebtRow = { id: string; gameId: string; kind: string; owedBy: string; owedTo: string; iv: string; ct: string; createdAt: string; paidAt: string | null };
+type Debt = DebtRow & { text: string };
 
 type Person = { id: string; name: string };
 type Props = {
@@ -50,6 +54,23 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
   const [games, setGames] = useState<Game[] | null>(null);
   const [view, setView] = useState<View>({ screen: "home" });
   const [busy, setBusy] = useState(false);
+  const [debts, setDebts] = useState<Debt[]>([]);
+
+  const loadDebts = useCallback(async () => {
+    try {
+      const { debts: rows } = await api<{ debts: DebtRow[] }>("/api/live/debts");
+      setDebts(await Promise.all(rows.map(async (r) => {
+        try { return { ...r, text: (await decryptJSON<{ text: string }>(vault.encKey, r.iv, r.ct, betAad(vault.spaceId, r.gameId, r.owedTo))).text }; }
+        catch { return { ...r, text: "(couldn't unlock)" }; }
+      })));
+    } catch { /* not critical */ }
+  }, [vault]);
+  useEffect(() => { void loadDebts(); }, [loadDebts]);
+
+  async function settle(d: Debt, action: "paid" | "forgive") {
+    try { await api("/api/live/debts", { body: { action, id: d.id } }); await loadDebts(); onToast(action === "paid" ? "Paid with love" : "Let go, with love"); }
+    catch (err) { onToast(err instanceof ApiError ? err.message : "Couldn't update that."); }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -136,7 +157,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
       </header>
       <div className="planner__body">
         {!games ? <p className="hint">Setting up the games…</p>
-          : view.screen === "home" ? <Home games={games} me={me} partner={partner} busy={busy} start={start} onLive={onLive} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
+          : view.screen === "home" ? <Home games={games} me={me} partner={partner} busy={busy} start={start} onLive={onLive} debts={debts} settle={settle} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
           : view.screen === "play" && find(view.id) ? <Play key={view.id} game={find(view.id)!} me={me} partner={partner} busy={busy} submit={submit} nameOf={nameOf} />
           : view.screen === "results" && find(view.id) ? <Results game={find(view.id)!} me={me} partner={partner} nameOf={nameOf} remove={remove} />
           : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onToast={onToast} />
@@ -151,8 +172,9 @@ function scoreOf(g: Game): number {
   return g.questions.reduce((n, _, i) => n + (g.mine![i] === g.theirs![i] ? 1 : 0), 0);
 }
 
-function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive }: {
+function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive, debts, settle }: {
   games: Game[]; me: Person; partner: Person | null; busy: boolean; onLive: (k: "ludo" | "whot") => void;
+  debts: Debt[]; settle: (d: Debt, a: "paid" | "forgive") => void;
   start: (k: GameKind) => void; open: (g: Game) => void; deck: (d: DeckKind) => void; nameOf: (id: string | null) => string;
 }) {
   const yourTurn = games.filter((g) => !g.mine);
@@ -196,6 +218,30 @@ function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive }: {
         </div>
         <p className="hint">Live games only move while you&apos;re both here. {partner ? `${partner.name} gets a notification to join.` : ""}</p>
       </section>
+
+      {debts.length > 0 && (
+        <section className="gsec">
+          <p className="sheet__title">Love debts</p>
+          {debts.slice(0, 12).map((d) => {
+            const owedToMe = d.owedTo === me.id;
+            return (
+              <div key={d.id} className={d.paidAt ? "debt debt--paid" : owedToMe ? "debt debt--mine" : "debt"}>
+                <span className="debt__text">
+                  <small>{owedToMe ? `${partner?.name ?? "They"} owe${partner ? "s" : ""} you` : `You owe ${partner?.name ?? "them"}`} · {d.kind === "ludo" ? "Ludo" : "Whot"}</small>
+                  <strong>{d.text}</strong>
+                </span>
+                {d.paidAt ? <span className="debt__paid">Paid</span>
+                  : owedToMe ? (
+                    <span className="debt__actions">
+                      <button type="button" className="btn btn--small" onClick={() => settle(d, "paid")}>Paid</button>
+                      <button type="button" className="link-btn link-btn--quiet" onClick={() => settle(d, "forgive")}>Let go</button>
+                    </span>
+                  ) : <span className="debt__paid debt__paid--due">Due</span>}
+              </div>
+            );
+          })}
+        </section>
+      )}
 
       <section className="gsec">
         <p className="sheet__title">New game</p>

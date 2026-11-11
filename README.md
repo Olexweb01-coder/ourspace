@@ -107,6 +107,17 @@ Setup: run `db/008_status_typing.sql` once in Neon.
 - **New spaces always need the host password**, even when you're signed in as the host.
 Setup: run `db/009_about_live.sql` once in Neon.
 
+## 3D games, settings, music and bets
+- **3D Ludo and Whot** (three.js 0.186.1, loaded only when a game opens). Each phone sees its own colour/hand nearest it.
+  Redraws only when something moves, and lowers its own quality on a struggling phone. Falls back to 2D without WebGL.
+- **Lobby:** the opener sets the rules; each person places a bet; both tap Ready. Changing rules or bets resets Ready.
+  Ludo: 2/4 pawns, out on 6 or 6-or-1, safe stars, extra roll after capture, Fast (single moves play themselves).
+  Whot: 4/5/6 cards, pick three on 5, stacking, general market on 14, hold on 1, suspension 8, Fast (auto market).
+- **Music:** four instrumentals composed live with Web Audio (no recordings, nothing to license), plus game sounds.
+- **Bets and Love debts:** bets are encrypted like messages. A win records what the loser owes; only the winner can
+  mark it Paid or Let go.
+Setup: run `db/010_game_settings_bets.sql` once in Neon.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

@@ -1,7 +1,7 @@
 import { randomInt } from "crypto";
 import { db } from "@/lib/db";
-import { initLudo, ludoMove, ludoRoll, type LudoState } from "./ludo";
-import { initWhot, whotDraw, whotPlay, whotView, type Card, type WhotState } from "./whot";
+import { cleanLudoRules, initLudo, ludoMove, ludoRoll, type LudoState } from "./ludo";
+import { cleanWhotRules, initWhot, whotDraw, whotPlay, whotView, type Card, type WhotState } from "./whot";
 
 export const PRESENT_SECONDS = 8;
 export type LiveKind = "ludo" | "whot";
@@ -15,9 +15,14 @@ export function shuffle(cards: Card[]): Card[] {
 }
 export const rollDie = () => randomInt(1, 7);
 
-export function newState(kind: LiveKind, first: string, second: string): LudoState | WhotState {
+export const cleanSettings = (kind: LiveKind, raw: unknown) =>
+  kind === "ludo" ? cleanLudoRules(raw as never) : cleanWhotRules(raw as never);
+
+export function newState(kind: LiveKind, first: string, second: string, settings?: unknown): LudoState | WhotState {
   const starter = randomInt(2) === 0 ? first : second;
-  return kind === "ludo" ? initLudo(first, second, starter) : initWhot(first, second, starter, shuffle);
+  return kind === "ludo"
+    ? initLudo(first, second, starter, cleanLudoRules(settings as never))
+    : initWhot(first, second, starter, shuffle, cleanWhotRules(settings as never));
 }
 
 export function applyAction(kind: LiveKind, state: LudoState | WhotState, me: string, a: { action?: string; token?: number; index?: number; call?: string | null }) {
@@ -39,7 +44,7 @@ export const isOver = (s: LudoState | WhotState) => ("ended" in s ? !!s.ended ||
 export async function viewFor(gameId: string, me: string) {
   const sql = db();
   const rows = await sql`
-    select g.id, g.kind, g.status, g.state, g.version, g.created_by,
+    select g.id, g.kind, g.status, g.state, g.version, g.created_by, g.settings, g.bets, g.ready,
            coalesce((select json_agg(json_build_object('id', m.id, 'name', m.display_name,
              'present', exists (select 1 from live_presence p where p.game_id = g.id and p.member_id = m.id
                                 and p.pinged_at > now() - make_interval(secs => ${PRESENT_SECONDS})))
@@ -48,5 +53,8 @@ export async function viewFor(gameId: string, me: string) {
   const g = rows[0];
   if (!g) return null;
   const state = g.state && g.kind === "whot" ? whotView(g.state as WhotState, me) : g.state;
-  return { id: g.id, kind: g.kind as LiveKind, status: g.status, version: g.version, createdBy: g.created_by, people: g.people, state };
+  return {
+    id: g.id, kind: g.kind as LiveKind, status: g.status, version: g.version, createdBy: g.created_by, people: g.people, state,
+    settings: cleanSettings(g.kind as LiveKind, g.settings), bets: g.bets ?? {}, ready: g.ready ?? [],
+  };
 }

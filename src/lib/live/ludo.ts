@@ -7,8 +7,28 @@ export const START: Record<LudoColor, number> = { red: 0, green: 13, yellow: 26,
 export const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
 export const HOME = 56;
 
+export type LudoRules = {
+  pawns: 2 | 4;                       // 2 = quick game
+  outOn: "six" | "six-or-one";        // what brings a pawn out of base
+  safeStars: boolean;                 // star squares protect from capture
+  captureBonus: boolean;              // extra roll after a capture
+  fast: boolean;                      // quicker hops; a single possible move plays itself
+};
+export const DEFAULT_LUDO: LudoRules = { pawns: 4, outOn: "six", safeStars: true, captureBonus: true, fast: false };
+export function cleanLudoRules(r: Partial<LudoRules> | null | undefined): LudoRules {
+  return {
+    pawns: r?.pawns === 2 ? 2 : 4,
+    outOn: r?.outOn === "six-or-one" ? "six-or-one" : "six",
+    safeStars: r?.safeStars !== false,
+    captureBonus: r?.captureBonus !== false,
+    fast: r?.fast === true,
+  };
+}
+const STARTS = new Set(Object.values(START));
+
 export type LudoState = {
   kind: "ludo";
+  rules?: LudoRules;
   players: { id: string; color: LudoColor }[];
   tokens: Record<string, number[]>;
   turn: string;
@@ -20,17 +40,19 @@ export type LudoState = {
   moves: number;
 };
 
-export function initLudo(first: string, second: string, starter: string): LudoState {
+export function initLudo(first: string, second: string, starter: string, rules: LudoRules = DEFAULT_LUDO): LudoState {
+  const pawns = () => Array.from({ length: rules.pawns }, () => -1);
   return {
     kind: "ludo",
+    rules,
     players: [{ id: first, color: "red" }, { id: second, color: "yellow" }],
-    tokens: { [first]: [-1, -1, -1, -1], [second]: [-1, -1, -1, -1] },
+    tokens: { [first]: pawns(), [second]: pawns() },
     turn: starter,
     phase: "roll",
     dice: null,
     sixes: 0,
     winner: null,
-    last: "Game on. Roll a 6 to bring a token out.",
+    last: rules.outOn === "six" ? "Game on. Roll a 6 to bring a pawn out." : "Game on. Roll a 6 or a 1 to bring a pawn out.",
     moves: 0,
   };
 }
@@ -43,10 +65,14 @@ export function trackSquare(color: LudoColor, progress: number): number | null {
   return progress >= 0 && progress <= 50 ? (START[color] + progress) % 52 : null;
 }
 
+const rulesOf = (s: LudoState) => s.rules ?? DEFAULT_LUDO;
+const canLeave = (r: LudoRules, d: number) => d === 6 || (r.outOn === "six-or-one" && d === 1);
+
 export function legalMoves(s: LudoState, id: string): number[] {
   if (s.phase !== "move" || s.turn !== id || s.dice === null || s.winner) return [];
   const d = s.dice;
-  return s.tokens[id].flatMap((p, i) => ((p === -1 ? d === 6 : p !== HOME && p + d <= HOME) ? [i] : []));
+  const r = rulesOf(s);
+  return s.tokens[id].flatMap((p, i) => ((p === -1 ? canLeave(r, d) : p !== HOME && p + d <= HOME) ? [i] : []));
 }
 
 export function ludoRoll(s: LudoState, id: string, value: number): LudoState {
@@ -79,17 +105,19 @@ export function ludoMove(s: LudoState, id: string, token: number): LudoState {
   mine[token] = to;
 
   let captured = 0;
+  const r = rulesOf(s);
   const theirs = [...s.tokens[opp]];
   const sq = trackSquare(me, to);
-  if (sq !== null && !SAFE.has(sq)) {
+  const safe = sq !== null && (STARTS.has(sq) || (r.safeStars && SAFE.has(sq)));
+  if (sq !== null && !safe) {
     const oc = colorOf(s, opp);
     theirs.forEach((p, i) => { if (trackSquare(oc, p) === sq) { theirs[i] = -1; captured++; } });
   }
   const finished = to === HOME;
   const won = mine.every((p) => p === HOME);
-  const extra = !won && (d === 6 || captured > 0 || finished);
-  const last = won ? "Won the game!" : captured ? `Captured ${captured === 1 ? "a token" : `${captured} tokens`}! Roll again.`
-    : finished ? "A token made it home! Roll again." : from === -1 ? "A token came out." : `Moved ${d}.`;
+  const extra = !won && (d === 6 || (captured > 0 && r.captureBonus) || finished);
+  const last = won ? "Won the game!" : captured ? `Captured ${captured === 1 ? "a pawn" : `${captured} pawns`}!${extra ? " Roll again." : ""}`
+    : finished ? "A pawn made it home! Roll again." : from === -1 ? "A pawn came out." : `Moved ${d}.`;
   return {
     ...s,
     tokens: { ...s.tokens, [id]: mine, [opp]: theirs },

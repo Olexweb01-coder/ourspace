@@ -3,7 +3,7 @@ import { HOME, SAFE, START, type LudoColor, type LudoState } from "@/lib/live/lu
 
 // A real 15 x 15 Ludo board. Coordinates are [column, row] cells.
 const C = 20; // cell size in the SVG
-const TRACK: [number, number][] = [
+export const TRACK: [number, number][] = [
   [1, 6], [2, 6], [3, 6], [4, 6], [5, 6],
   [6, 5], [6, 4], [6, 3], [6, 2], [6, 1], [6, 0],
   [7, 0],
@@ -18,16 +18,16 @@ const TRACK: [number, number][] = [
   [0, 7],
   [0, 6],
 ];
-const HOME_COL: Record<LudoColor, [number, number][]> = {
+export const HOME_COL: Record<LudoColor, [number, number][]> = {
   red: [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7]],
   green: [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5]],
   yellow: [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]],
   blue: [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9]],
 };
-const BASE: Record<LudoColor, [number, number]> = { red: [0, 0], green: [9, 0], yellow: [9, 9], blue: [0, 9] };
+export const BASE: Record<LudoColor, [number, number]> = { red: [0, 0], green: [9, 0], yellow: [9, 9], blue: [0, 9] };
 export const LUDO_HEX: Record<LudoColor, string> = { red: "#d64560", green: "#3fa67a", yellow: "#e9b949", blue: "#4a7bd1" };
 
-function tokenCell(color: LudoColor, p: number, i: number): [number, number] {
+export function tokenCell(color: LudoColor, p: number, i: number): [number, number] {
   if (p === -1) { const [bx, by] = BASE[color]; return [bx + 1.5 + (i % 2) * 2, by + 1.5 + Math.floor(i / 2) * 2]; }
   if (p <= 50) { const [x, y] = TRACK[(START[color] + p) % 52]; return [x + 0.5, y + 0.5]; }
   if (p < HOME) { const [x, y] = HOME_COL[color][p - 51]; return [x + 0.5, y + 0.5]; }

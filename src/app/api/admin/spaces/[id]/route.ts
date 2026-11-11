@@ -26,6 +26,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     await sql.transaction([
       sql`delete from sessions where member_id = ${rows[0].id}`,
       sql`delete from push_subscriptions where member_id = ${rows[0].id}`,
+      sql`delete from device_locks where member_id = ${rows[0].id}`,
       sql`delete from invites where space_id = ${id} and role = ${role} and used_at is null`,
     ]);
   }

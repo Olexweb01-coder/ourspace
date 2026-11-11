@@ -16,6 +16,8 @@ End-to-end encrypted PWA. Next.js 15 on Vercel, Neon Postgres. Built by olexweb.
 3. Push to GitHub, import the repo in Vercel, add every variable from `.env.example`, deploy.
    Use a real HTTPS domain for `APP_URL`, e.g. `https://love.olexweb.com`.
 4. Open `APP_URL/setup` on **your** phone, enter `HOST_SETUP_KEY`, your name, her name and the password.
+   That's the only time the key is needed. Afterwards, new spaces start from Settings → "Start a space with someone new"
+   while you're signed in: no key. Anyone not signed in as the host gets no form at all.
 5. Send her the invite link. Tell her the password in person or on a call.
 
 ### What she does
@@ -80,6 +82,12 @@ Open the dice button in the chat header.
 - All of it lives in `src/lib/games-bank.ts`. Add items to the END of any list to grow it.
 
 Setup: run `db/005_games.sql` once in Neon.
+
+## App lock
+The shared password is typed once per phone. After that each of you can open the app with a PIN, pattern or password
+(the same as each other or different, your choice). The phone keeps the key scrambled; it only unscrambles with your
+lock plus a secret the server releases for the right lock, 5 tries max, then the shared password is needed again.
+Setup: run `db/006_app_lock.sql` once in Neon.
 
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.

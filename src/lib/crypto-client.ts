@@ -27,15 +27,21 @@ export function newSalt(): string {
   return toB64(crypto.getRandomValues(new Uint8Array(16)));
 }
 
-export type DerivedKeys = { encKey: CryptoKey; authToken: string };
+export type DerivedKeys = { encKey: CryptoKey; authToken: string; master: Uint8Array<ArrayBuffer> };
 
-export async function deriveKeys(password: string, saltB64: string, iterations: number): Promise<DerivedKeys> {
+/** The slow step: shared password -> 32-byte master secret. */
+export async function deriveMaster(password: string, saltB64: string, iterations: number): Promise<Uint8Array<ArrayBuffer>> {
   const base = await crypto.subtle.importKey("raw", te.encode(password.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
-  const master = await crypto.subtle.deriveBits(
+  const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", salt: fromB64(saltB64), iterations, hash: "SHA-256" },
     base,
     256,
   );
+  return new Uint8Array(bits);
+}
+
+/** The fast step: master secret -> encryption key + login proof. The app lock stores the master, scrambled. */
+export async function keysFromMaster(master: Uint8Array<ArrayBuffer>): Promise<DerivedKeys> {
   const hkdf = await crypto.subtle.importKey("raw", master, "HKDF", false, ["deriveKey", "deriveBits"]);
   const empty = new Uint8Array(0);
   const encKey = await crypto.subtle.deriveKey(
@@ -50,7 +56,50 @@ export async function deriveKeys(password: string, saltB64: string, iterations: 
     hkdf,
     256,
   );
-  return { encKey, authToken: toB64(authBits) };
+  return { encKey, authToken: toB64(authBits), master };
+}
+
+export async function deriveKeys(password: string, saltB64: string, iterations: number): Promise<DerivedKeys> {
+  return keysFromMaster(await deriveMaster(password, saltB64, iterations));
+}
+
+// ---------------- App lock ----------------
+// lock (PIN / pattern / password) --PBKDF2--> 64 bytes: first half proves the lock to the server,
+// second half never leaves the phone. Unlock key = HKDF(server half + phone half).
+
+export const LOCK_ITERATIONS = 300_000;
+
+export async function lockSecrets(lock: string, saltB64: string): Promise<{ proof: string; phoneHalf: Uint8Array<ArrayBuffer> }> {
+  const base = await crypto.subtle.importKey("raw", te.encode(lock.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: fromB64(saltB64), iterations: LOCK_ITERATIONS, hash: "SHA-256" }, base, 512));
+  const phoneHalf = new Uint8Array(new ArrayBuffer(32));
+  phoneHalf.set(bits.slice(32));
+  return { proof: toB64(bits.slice(0, 32)), phoneHalf };
+}
+
+async function unlockKey(serverHalfB64: string, phoneHalf: Uint8Array<ArrayBuffer>, deviceId: string): Promise<CryptoKey> {
+  const server = fromB64(serverHalfB64);
+  const joined = new Uint8Array(new ArrayBuffer(server.length + phoneHalf.length));
+  joined.set(server, 0);
+  joined.set(phoneHalf, server.length);
+  const hkdf = await crypto.subtle.importKey("raw", joined, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: te.encode(`ourspace/applock/v1/${deviceId}`) },
+    hkdf, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+export async function sealMaster(master: Uint8Array<ArrayBuffer>, serverHalf: string, phoneHalf: Uint8Array<ArrayBuffer>, deviceId: string) {
+  const key = await unlockKey(serverHalf, phoneHalf, deviceId);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, master);
+  return { iv: toB64(iv), ct: toB64(ct) };
+}
+
+export async function openMaster(sealed: { iv: string; ct: string }, serverHalf: string, phoneHalf: Uint8Array<ArrayBuffer>, deviceId: string) {
+  const key = await unlockKey(serverHalf, phoneHalf, deviceId);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(sealed.iv) }, key, fromB64(sealed.ct));
+  return new Uint8Array(pt);
 }
 
 export async function encryptJSON(key: CryptoKey, value: unknown, aad: string): Promise<{ iv: string; ct: string }> {

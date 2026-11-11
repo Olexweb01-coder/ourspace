@@ -1,6 +1,7 @@
 // Holds the decryption key in memory only. Closing or locking the app forgets it.
 export type Vault = {
   encKey: CryptoKey;
+  master: Uint8Array<ArrayBuffer>; // memory only, needed to set or change the app lock
   spaceId: string;
   memberId: string;
 };

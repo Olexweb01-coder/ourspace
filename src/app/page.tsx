@@ -3,22 +3,36 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BondMark from "@/components/BondMark";
+import LockInput from "@/components/LockInput";
+import LockSetup from "@/components/LockSetup";
 import { api, ApiError } from "@/lib/api";
+import { getLock, LockReset, lockSkipped, skipLock, unlockWithLock } from "@/lib/applock";
 import { APP_NAME } from "@/lib/brand";
-import { deriveKeys } from "@/lib/crypto-client";
+import { deriveKeys, type DerivedKeys } from "@/lib/crypto-client";
 import { initial } from "@/lib/format";
 import { personalizeInstall } from "@/lib/install";
-import { rememberSpace, savedSpaces, setVault, type SavedSpace } from "@/lib/vault";
+import { rememberSpace, savedSpaces, setVault, type SavedSpace, type Vault } from "@/lib/vault";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export default function UnlockPage() {
   const router = useRouter();
   const [spaces, setSpaces] = useState<SavedSpace[] | null>(null);
   const [current, setCurrent] = useState<SavedSpace | null>(null);
+  const [mode, setMode] = useState<"lock" | "password">("password");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offerLock, setOfferLock] = useState<Vault | null>(null);
+
+  function choose(s: SavedSpace | null) {
+    setCurrent(s);
+    setError(null);
+    if (!s) return;
+    personalizeInstall(s.spaceId, s.memberId);
+    setMode(getLock(s.spaceId) ? "lock" : "password");
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -32,40 +46,69 @@ export default function UnlockPage() {
         list = savedSpaces();
       }
     }
-    const pick = list.find((x) => x.spaceId === s) ?? list[0] ?? null;
     setSpaces(list);
-    setCurrent(pick);
-    if (pick) personalizeInstall(pick.spaceId, pick.memberId);
+    choose(list.find((x) => x.spaceId === s) ?? list[0] ?? null);
   }, []);
 
-  function choose(s: SavedSpace) {
-    setCurrent(s);
-    setError(null);
-    personalizeInstall(s.spaceId, s.memberId);
+  async function finish(keys: DerivedKeys, s: SavedSpace, viaPassword: boolean) {
+    const res = await api<{ name: string; label: string }>("/api/auth/login", {
+      body: { spaceId: s.spaceId, memberId: s.memberId, authToken: keys.authToken, tz: tz() },
+    });
+    rememberSpace({ ...s, label: res.label, myName: res.name });
+    const vault: Vault = { encKey: keys.encKey, master: keys.master, spaceId: s.spaceId, memberId: s.memberId };
+    setVault(vault);
+    setPassword("");
+    // After the shared password, offer a quicker lock for next time (once, unless skipped).
+    if (viaPassword && !getLock(s.spaceId) && !lockSkipped(s.spaceId)) {
+      setCurrent({ ...s, myName: res.name, label: res.label });
+      setOfferLock(vault);
+      setBusy(false);
+      return;
+    }
+    router.push(`/chat?s=${s.spaceId}&m=${s.memberId}`);
   }
 
-  async function unlock(e: FormEvent) {
+  async function withPassword(e: FormEvent) {
     e.preventDefault();
     if (!current || busy || !password) return;
     setBusy(true);
     setError(null);
     try {
       const { salt, iterations } = await api<{ salt: string; iterations: number }>(`/api/auth/salt?spaceId=${current.spaceId}`);
-      const { encKey, authToken } = await deriveKeys(password, salt, iterations);
-      const res = await api<{ name: string; label: string }>("/api/auth/login", {
-        body: { spaceId: current.spaceId, memberId: current.memberId, authToken, tz: Intl.DateTimeFormat().resolvedOptions().timeZone },
-      });
-      rememberSpace({ ...current, label: res.label, myName: res.name });
-      setVault({ encKey, spaceId: current.spaceId, memberId: current.memberId });
-      setPassword("");
-      router.push(`/chat?s=${current.spaceId}&m=${current.memberId}`);
+      await finish(await deriveKeys(password, salt, iterations), current, true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't reach your space. Check your connection and try again.");
       setBusy(false);
     }
   }
 
+  async function withLock(value: string) {
+    if (!current || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { keys } = await unlockWithLock(current.spaceId, value);
+      await finish(keys, current, false);
+    } catch (err) {
+      if (err instanceof LockReset) { setMode("password"); setError(err.message); }
+      else setError(err instanceof ApiError ? err.message : "Couldn't reach your space. Check your connection and try again.");
+      setBusy(false);
+    }
+  }
+
   if (spaces === null) return <main className="gate" />;
+
+  if (offerLock && current) {
+    const go = () => router.push(`/chat?s=${current.spaceId}&m=${current.memberId}`);
+    return (
+      <main className="gate">
+        <BondMark size={56} a={initial(current.myName)} />
+        <h1 className="gate__title">Quicker next time?</h1>
+        <LockSetup vault={offerLock} partnerName={current.label || undefined} onDone={go}
+          onSkip={() => { skipLock(current.spaceId); go(); }} skipLabel="Not now, I'll use the shared password" />
+      </main>
+    );
+  }
 
   if (!current) {
     return (
@@ -78,46 +121,50 @@ export default function UnlockPage() {
     );
   }
 
+  const lock = getLock(current.spaceId);
   return (
     <main className="gate">
       <BondMark size={64} a={initial(current.myName)} b="" />
       <h1 className="gate__title">{APP_NAME}</h1>
-      <p className="gate__lead">Enter the password only the two of you know.</p>
 
       {spaces.length > 1 && (
         <div className="chips" role="radiogroup" aria-label="Choose a space">
           {spaces.map((s) => (
-            <button
-              key={s.spaceId}
-              type="button"
-              role="radio"
-              aria-checked={s.spaceId === current.spaceId}
-              className={s.spaceId === current.spaceId ? "chip chip--on" : "chip"}
-              onClick={() => choose(s)}
-            >
+            <button key={s.spaceId} type="button" role="radio" aria-checked={s.spaceId === current.spaceId}
+              className={s.spaceId === current.spaceId ? "chip chip--on" : "chip"} onClick={() => choose(s)}>
               {s.label || "Our space"}
             </button>
           ))}
         </div>
       )}
 
-      <form className="gate__form" onSubmit={unlock}>
-        <label className="sr-only" htmlFor="pw">Shared password</label>
-        <input
-          id="pw"
-          className="field"
-          type="password"
-          autoComplete="current-password"
-          placeholder="Shared password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoFocus
-        />
-        <button className="btn btn--wide" disabled={busy || !password}>
-          {busy ? "Opening…" : "Unlock"}
-        </button>
-        {error && <p className="error" role="alert">{error}</p>}
-      </form>
+      {mode === "lock" && lock ? (
+        <>
+          <p className="gate__lead">{lock.kind === "pattern" ? "Draw your pattern." : lock.kind === "pin" ? "Enter your PIN." : "Enter your app lock password."}</p>
+          <LockInput key={current.spaceId} kind={lock.kind} pinLength={lock.pinLength} busy={busy} onSubmit={withLock} />
+          {busy && <p className="hint">Opening…</p>}
+          {error && <p className="error" role="alert">{error}</p>}
+          <button type="button" className="quiet-link link-btn--quiet" onClick={() => { setMode("password"); setError(null); }}>
+            Use the shared password instead
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="gate__lead">Enter the password only the two of you know.</p>
+          <form className="gate__form" onSubmit={withPassword}>
+            <label className="sr-only" htmlFor="pw">Shared password</label>
+            <input id="pw" className="field" type="password" autoComplete="current-password" placeholder="Shared password"
+              value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
+            <button className="btn btn--wide" disabled={busy || !password}>{busy ? "Opening…" : "Unlock"}</button>
+            {error && <p className="error" role="alert">{error}</p>}
+          </form>
+          {lock && (
+            <button type="button" className="quiet-link link-btn--quiet" onClick={() => { setMode("lock"); setError(null); }}>
+              Use my {lock.kind === "pin" ? "PIN" : lock.kind} instead
+            </button>
+          )}
+        </>
+      )}
     </main>
   );
 }

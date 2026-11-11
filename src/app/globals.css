@@ -687,3 +687,25 @@ button.banner { border: 0; width: calc(100% - 24px); text-align: left; font: inh
 .chat__head .icon-btn svg { width: 21px; height: 21px; }
 .chat__status .streak-pill { padding: 1px 7px 1px 5px; font-size: 0.75rem; }
 @media (max-width: 370px) { .chat__head .icon-btn { width: 32px; } .chat__head { gap: 4px; padding-left: 10px; padding-right: 8px; } }
+
+/* ---------- app lock ---------- */
+.locksetup { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.pin { display: flex; flex-direction: column; align-items: center; gap: 22px; width: 100%; }
+.pin__dots { display: flex; gap: 14px; min-height: 16px; }
+.pin__dots span { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--muted); }
+.pin__dots span.on { background: var(--candle); box-shadow: none; }
+.pin__keys { display: grid; grid-template-columns: repeat(3, 72px); gap: 14px 22px; }
+.pin__key {
+  width: 72px; height: 72px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.07);
+  color: var(--blush); font-size: 1.6rem; font-family: var(--font-display), Georgia, serif;
+}
+.pin__key:active { background: rgba(246, 201, 127, 0.25); }
+.pin__key--text { background: transparent; font-size: 0.85rem; font-family: var(--font-body), system-ui, sans-serif; color: var(--muted); }
+.pattern { width: min(78vw, 280px); height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.modal--center { align-items: center; }
+.lock-modal {
+  width: 100%; max-width: 400px; background: var(--plum-2); border-radius: 24px; padding: 22px 18px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; max-height: 90dvh; overflow-y: auto;
+}
+.lock-modal .gate__lead { font-size: 0.92rem; }
+button.quiet-link { background: none; border: 0; padding: 6px; font: inherit; font-size: 0.9rem; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

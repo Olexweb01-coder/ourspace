@@ -7,11 +7,13 @@ import InviteBox from "@/components/InviteBox";
 import MediaBubble, { type MediaState } from "@/components/MediaBubble";
 import MediaViewer from "@/components/MediaViewer";
 import Games from "@/components/Games";
+import LockSetup from "@/components/LockSetup";
 import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
+import { getLock, LOCK_LABEL, removeLock, type LockKind } from "@/lib/applock";
 import { APP_NAME } from "@/lib/brand";
 import { decryptJSON, encryptJSON, messageAad } from "@/lib/crypto-client";
 import { ANGRY, LOVE, onlyLoveAndAngry } from "@/lib/emoji";
@@ -124,6 +126,8 @@ export default function ChatPage() {
   const plainCache = useRef(new Map<string, unknown>());
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [lockKind, setLockKind] = useState<LockKind | null>(null);
+  const [lockSetupOpen, setLockSetupOpen] = useState(false);
   const prevDone = useRef<boolean | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -157,6 +161,7 @@ export default function ChatPage() {
     const clean = `/chat?s=${v.spaceId}&m=${v.memberId}`;
     if (window.location.pathname + window.location.search !== clean) window.history.replaceState(null, "", clean);
     setReady(true);
+    setLockKind(getLock(v.spaceId)?.kind ?? null);
     void reportNotificationState().then(setNotif);
   }, [router]);
 
@@ -703,7 +708,9 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!menuOpen) return;
-    api<Usage>("/api/media/usage").then(setUsage).catch(() => {});
+    api<Usage>("/api/media/usage")
+      .then((u) => { if (typeof u?.limitBytes === "number" && typeof u?.uploadLimit === "number") setUsage(u); })
+      .catch(() => {});
   }, [menuOpen]);
 
   async function turnOnNotifications() {
@@ -886,6 +893,29 @@ export default function ChatPage() {
               </>
             ) : <p className="hint">Checking…</p>}
           </div>
+
+          <div className="sheet__group">
+            <p className="sheet__title">App lock on this phone</p>
+            {lockKind
+              ? <p className="hint">Opens with your {LOCK_LABEL[lockKind].toLowerCase()}. The shared password always works too.</p>
+              : <p className="hint">Off. You type the shared password each time you open the app.</p>}
+            <div className="row">
+              <button className="btn btn--ghost" onClick={() => setLockSetupOpen(true)}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
+              {lockKind && (
+                <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>
+                  Turn off
+                </button>
+              )}
+            </div>
+          </div>
+
+          {me.role === "host" && (
+            <div className="sheet__group">
+              <p className="sheet__title">Another space</p>
+              <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
+              <p className="hint">A completely separate space with its own password. No setup key needed.</p>
+            </div>
+          )}
 
           <div className="sheet__group">
             <p className="sheet__title">Notifications on this phone</p>
@@ -1152,6 +1182,16 @@ export default function ChatPage() {
         <StreakSheet current={st.current} best={st.best} todayDone={st.todayDone} iSent={iSentToday} partnerName={partnerName} onClose={() => setStreakOpen(false)} />
       )}
       {celebrate !== null && <Celebration {...celebrate} onClose={() => setCelebrate(null)} />}
+      {lockSetupOpen && (
+        <div className="modal modal--center" role="dialog" aria-modal="true" aria-label="App lock">
+          <div className="lock-modal">
+            <p className="sheet__title">{lockKind ? "Change your app lock" : "Set your app lock"}</p>
+            <LockSetup vault={vault} partnerName={partner?.name}
+              onDone={(k) => { setLockKind(k); setLockSetupOpen(false); setToast(`${LOCK_LABEL[k]} set. Use it next time you open the app.`); }}
+              onSkip={() => setLockSetupOpen(false)} skipLabel="Cancel" />
+          </div>
+        </div>
+      )}
       {gamesOpen && (
         <Games
           vault={vault}

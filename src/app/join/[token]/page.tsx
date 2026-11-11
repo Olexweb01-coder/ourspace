@@ -35,12 +35,12 @@ export default function JoinPage() {
     setBusy(true);
     setError(null);
     try {
-      const { encKey, authToken } = await deriveKeys(password, invite.salt, invite.iterations);
+      const { encKey, authToken, master } = await deriveKeys(password, invite.salt, invite.iterations);
       const res = await api<{ spaceId: string; memberId: string; name: string; label: string }>("/api/join", {
         body: { token, name, authToken },
       });
       rememberSpace({ spaceId: res.spaceId, memberId: res.memberId, label: res.label, myName: res.name });
-      setVault({ encKey, spaceId: res.spaceId, memberId: res.memberId });
+      setVault({ encKey, master, spaceId: res.spaceId, memberId: res.memberId });
       personalizeInstall(res.spaceId, res.memberId);
       setPassword("");
       router.replace(`/chat?s=${res.spaceId}&m=${res.memberId}&welcome=1`);

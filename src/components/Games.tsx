@@ -18,6 +18,7 @@ type Props = {
   onToast: (m: string) => void;
   onSendText: (text: string) => Promise<boolean>;
   onChanged: () => void;
+  onLive: (kind: "ludo" | "whot") => void;
 };
 
 type Row = {
@@ -45,7 +46,7 @@ function savePlayed(spaceId: string, ids: Iterable<string>) {
 }
 const answerAad = (spaceId: string, id: string, memberId: string) => `answer:${spaceId}:${id}:${memberId}`;
 
-export default function Games({ vault, me, partner, onClose, onToast, onSendText, onChanged }: Props) {
+export default function Games({ vault, me, partner, onClose, onToast, onSendText, onChanged, onLive }: Props) {
   const [games, setGames] = useState<Game[] | null>(null);
   const [view, setView] = useState<View>({ screen: "home" });
   const [busy, setBusy] = useState(false);
@@ -135,7 +136,7 @@ export default function Games({ vault, me, partner, onClose, onToast, onSendText
       </header>
       <div className="planner__body">
         {!games ? <p className="hint">Setting up the games…</p>
-          : view.screen === "home" ? <Home games={games} me={me} partner={partner} busy={busy} start={start} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
+          : view.screen === "home" ? <Home games={games} me={me} partner={partner} busy={busy} start={start} onLive={onLive} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
           : view.screen === "play" && find(view.id) ? <Play key={view.id} game={find(view.id)!} me={me} partner={partner} busy={busy} submit={submit} nameOf={nameOf} />
           : view.screen === "results" && find(view.id) ? <Results game={find(view.id)!} me={me} partner={partner} nameOf={nameOf} remove={remove} />
           : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onToast={onToast} />
@@ -150,8 +151,8 @@ function scoreOf(g: Game): number {
   return g.questions.reduce((n, _, i) => n + (g.mine![i] === g.theirs![i] ? 1 : 0), 0);
 }
 
-function Home({ games, me, partner, busy, start, open, deck, nameOf }: {
-  games: Game[]; me: Person; partner: Person | null; busy: boolean;
+function Home({ games, me, partner, busy, start, open, deck, nameOf, onLive }: {
+  games: Game[]; me: Person; partner: Person | null; busy: boolean; onLive: (k: "ludo" | "whot") => void;
   start: (k: GameKind) => void; open: (g: Game) => void; deck: (d: DeckKind) => void; nameOf: (id: string | null) => string;
 }) {
   const yourTurn = games.filter((g) => !g.mine);
@@ -182,6 +183,19 @@ function Home({ games, me, partner, busy, start, open, deck, nameOf }: {
           ))}
         </section>
       )}
+
+      <section className="gsec">
+        <p className="sheet__title">Play live</p>
+        <div className="deck-row deck-row--two">
+          <button type="button" className="deck-tile deck-tile--ludo" disabled={!partner} onClick={() => onLive("ludo")}>
+            <strong>Ludo</strong><span>Real board, real dice</span>
+          </button>
+          <button type="button" className="deck-tile deck-tile--whot" disabled={!partner} onClick={() => onLive("whot")}>
+            <strong>Whot</strong><span>Naija rules</span>
+          </button>
+        </div>
+        <p className="hint">Live games only move while you&apos;re both here. {partner ? `${partner.name} gets a notification to join.` : ""}</p>
+      </section>
 
       <section className="gsec">
         <p className="sheet__title">New game</p>

@@ -79,3 +79,9 @@ export function predictCycle(data: CycleData, today: string): CyclePrediction | 
 
 /** Binds each encrypted item to its space and id so it can't be swapped with another. */
 export const plannerAad = (what: "day" | "goal" | "topic" | "cycle", spaceId: string, id: string) => `${what}:${spaceId}:${id}`;
+
+/** Age today from a birthday (year known), counting whether this year's birthday has come yet. */
+export function ageOn(startYear: number, month: number, day: number, today: string): number {
+  const y = Number(today.slice(0, 4));
+  return y - startYear - (occurrenceIn(y, month, day) > today ? 1 : 0);
+}

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { decryptJSON, encryptJSON } from "@/lib/crypto-client";
 import {
-  addDays, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle,
+  addDays, ageOn, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle,
   type CycleData, type DayKind,
 } from "@/lib/planner";
 import type { Vault } from "@/lib/vault";
@@ -217,7 +217,9 @@ function DaysTab({ data, me, partner, today, busy, act, seal }: TabProps) {
       <ul className="plist">
         {sorted.map((d) => {
           const years = d.startYear ? Number(d.occ.slice(0, 4)) - d.startYear : null;
-          const extra = d.kind === "birthday" && years ? `turns ${years}` : d.kind === "anniversary" && years ? `${years} ${years === 1 ? "year" : "years"} together` : "";
+          const extra = d.kind === "birthday" && years && d.startYear
+            ? (d.left === 0 ? `${years} today` : `${ageOn(d.startYear, d.month, d.day, today)} now, turns ${years}`)
+            : d.kind === "anniversary" && years ? `${years} ${years === 1 ? "year" : "years"} together` : "";
           return (
             <li key={d.id} className={d.left === 0 ? "pitem pitem--today" : "pitem"}>
               <div className="pitem__main">

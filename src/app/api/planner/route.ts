@@ -56,6 +56,8 @@ export async function POST(req: Request) {
         const m = await sql`select id from members where id = ${b.aboutMember} and space_id = ${me.spaceId}`;
         if (!m[0]) return fail("Whose birthday is it?");
         about = b.aboutMember;
+        const dup = await sql`select 1 from special_days where space_id = ${me.spaceId} and kind = 'birthday' and about_member = ${about} and id <> ${id}`;
+        if (dup[0]) return fail("That birthday is already saved. Edit the one in the list instead.", 409);
       }
       if (!okCipher(b.iv, b.ct)) return fail("Invalid day");
       const count = await sql`select count(*)::int as n from special_days where space_id = ${me.spaceId}`;

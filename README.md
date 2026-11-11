@@ -98,6 +98,15 @@ panel (status, feelings, plans, games, streak, settings) sliding in from the lef
 - **Status:** words on a colour or a photo, only for the two of you, deleted after 24 hours (file included).
 Setup: run `db/008_status_typing.sql` once in Neon.
 
+## About you, live Ludo and Whot
+- **About you:** each person says woman or man once (so the app says "her" and "him") and adds their own birthday,
+  which fills in for both of you with ages worked out automatically. One birthday per person.
+- **Live games:** Ludo (real board, server dice) and Whot (Naija rules, server shuffle). They only move while you're
+  both on the game screen; if one leaves, it pauses. Your Whot hand is never sent to the other phone.
+  Game boards aren't secret, so they're stored as plain game state; chats stay end-to-end encrypted.
+- **New spaces always need the host password**, even when you're signed in as the host.
+Setup: run `db/009_about_live.sql` once in Neon.
+
 ## Admin API (for the olexweb admin app)
 Call these **from your olexweb server only** with `Authorization: Bearer <ADMIN_API_KEY>`. Never put the key in browser code.
 

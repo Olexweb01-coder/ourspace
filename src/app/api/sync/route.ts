@@ -42,7 +42,7 @@ export async function GET(req: Request) {
               order by msg.id desc limit 150) t
             order by id::bigint asc`,
     sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at, avatar_media_id,
-          (typing_until > now()) as typing
+          (typing_until > now()) as typing, gender
         from members where space_id = ${me.spaceId}`,
     sql`select label, disappear_seconds, theme, background_media_id, best_streak from spaces where id = ${me.spaceId}`,
     sql`select day::text as day from activity_days
@@ -65,9 +65,15 @@ export async function GET(req: Request) {
     sql`delete from statuses where space_id = ${me.spaceId} and expires_at < now()`,
     sql`select id, member_id, media_id, iv, ciphertext, created_at, expires_at, seen_at from statuses
         where space_id = ${me.spaceId} and expires_at > now() order by created_at`,
+    sql`select g.id, g.kind, g.status, g.created_by,
+          exists (select 1 from live_presence p where p.game_id = g.id and p.member_id <> ${me.memberId}
+                  and p.pinged_at > now() - interval '8 seconds') as partner_here
+        from live_games g
+        where g.space_id = ${me.spaceId} and g.status in ('lobby','playing') and g.updated_at > now() - interval '30 minutes'
+        order by g.updated_at desc limit 1`,
   ]);
 
-  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses] = results;
+  const [, , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows] = results;
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
   const st = computeStreak(completeDays, today);
@@ -84,6 +90,7 @@ export async function GET(req: Request) {
       lastNudgeAt: m.last_nudge_at,
       avatarMediaId: m.avatar_media_id,
       typing: m.typing === true,
+      gender: m.gender ?? null,
     })),
     space: {
       label: spaces[0]?.label,
@@ -103,6 +110,7 @@ export async function GET(req: Request) {
       id: st.id, memberId: st.member_id, mediaId: st.media_id, iv: st.iv, ct: st.ciphertext,
       createdAt: st.created_at, expiresAt: st.expires_at, seenAt: st.seen_at,
     })),
+    live: liveRows[0] ? { id: liveRows[0].id, kind: liveRows[0].kind, status: liveRows[0].status, createdBy: liveRows[0].created_by, partnerHere: liveRows[0].partner_here } : null,
     gamesWaiting: gamesWaiting.map((g) => ({ id: g.id, kind: g.kind, createdBy: g.created_by })),
     cycles: cycles.map((c) => ({ memberId: c.member_id, iv: c.iv, ct: c.ciphertext })),
     moods: moods.map((m) => ({ memberId: m.member_id, day: m.day, iv: m.iv, ct: m.ciphertext, updatedAt: m.updated_at })),

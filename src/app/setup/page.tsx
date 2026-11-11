@@ -11,7 +11,7 @@ import { personalizeInstall } from "@/lib/install";
 import { rememberSpace, setVault } from "@/lib/vault";
 
 type Mode =
-  | { mode: "host"; name: string; used: number; max: number }   // signed in as host: nothing extra
+  | { mode: "host"; name: string; used: number; max: number; hostPasswordSet: boolean } // signed in as host: name known
   | { mode: "password" }                                          // ask for the host password
   | { mode: "create" }                                            // very first space: choose a host password
   | { mode: "settings" };                                         // spaces exist, no host password yet
@@ -38,8 +38,8 @@ export default function SetupPage() {
   }, []);
 
   const asHost = mode?.mode === "host";
-  // A new host password is chosen on the very first space, or when using the emergency reset.
-  const choosingHostPw = !asHost && (mode?.mode === "create" || recover);
+  // A new host password is chosen on the very first space, when the host hasn't set one, or in an emergency reset.
+  const choosingHostPw = mode?.mode === "create" || recover || (mode?.mode === "host" && !mode.hostPasswordSet);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -47,14 +47,14 @@ export default function SetupPage() {
     if (password.length < MIN_PASSWORD_LENGTH) return setError(`Use at least ${MIN_PASSWORD_LENGTH} characters. A short sentence only you two would say works best.`);
     if (password !== confirm) return setError("The two shared passwords don't match.");
     if (choosingHostPw && hostPassword !== hostConfirm) return setError("The two host passwords don't match.");
-    if (!asHost && hostPassword.length < 6) return setError("The host password is at least 6 characters.");
+    if (hostPassword.length < 6) return setError("The host password is at least 6 characters.");
     setBusy(true);
     try {
       const salt = newSalt();
       const { encKey, authToken, master } = await deriveKeys(password, salt, KDF_ITERATIONS);
       const res = await api<Done>("/api/setup", {
         body: {
-          ...(asHost ? {} : { hostPassword }), ...(recover ? { recoveryKey } : {}),
+          hostPassword, ...(recover ? { recoveryKey } : {}),
           hostName, label, salt, iterations: KDF_ITERATIONS, authToken,
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
@@ -105,7 +105,7 @@ export default function SetupPage() {
       <h1 className="gate__title">{asHost ? "A new space" : "Make a space"}</h1>
       <p className="gate__lead">
         {asHost
-          ? `Signed in as ${hostName}. ${mode.mode === "host" ? `${mode.used} of ${mode.max} spaces used. ` : ""}The password locks everything and nobody can reset it, so pick one you'll both remember.`
+          ? `Signed in as ${hostName}. ${mode.mode === "host" ? `${mode.used} of ${mode.max} spaces used. ` : ""}Enter your host password to start a new space.`
           : recover
             ? "Emergency reset: enter the key from Vercel and choose a new host password."
             : "The shared password locks everything. It never leaves your phone, and nobody can reset it."}
@@ -117,11 +117,12 @@ export default function SetupPage() {
             <input id="rk" className="field" type="password" value={recoveryKey} onChange={(e) => setRecoveryKey(e.target.value)} autoComplete="off" required />
           </>
         )}
-        {!asHost && (
+        {(
           <>
             <label className="label" htmlFor="hp">{choosingHostPw ? "Choose a host password" : "Host password"}</label>
             <input id="hp" className="field" type="password" value={hostPassword} onChange={(e) => setHostPassword(e.target.value)}
               autoComplete={choosingHostPw ? "new-password" : "current-password"} required autoFocus />
+            {!choosingHostPw && <p className="hint">Your own host password, not the shared password of any space.</p>}
             {choosingHostPw && (
               <>
                 <label className="label" htmlFor="hp2">Type the host password again</label>
@@ -138,7 +139,7 @@ export default function SetupPage() {
           </>
         )}
         <label className="label" htmlFor="l">What you call them</label>
-        <input id="l" className="field" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={40} placeholder="Babe" required autoFocus={asHost} />
+        <input id="l" className="field" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={40} placeholder="Babe" required />
         <label className="label" htmlFor="p">Shared password</label>
         <input id="p" className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
         <label className="label" htmlFor="c">Type it again</label>
@@ -146,7 +147,7 @@ export default function SetupPage() {
         <button className="btn btn--wide" disabled={busy}>{busy ? "Locking it up…" : "Create our space"}</button>
         {error && <p className="error" role="alert">{error}</p>}
       </form>
-      {mode.mode === "password" && !recover && (
+      {(mode.mode === "password" || (mode.mode === "host" && mode.hostPasswordSet)) && !recover && (
         <button type="button" className="quiet-link link-btn--quiet" onClick={() => { setRecover(true); setError(null); }}>Forgot your host password?</button>
       )}
     </main>

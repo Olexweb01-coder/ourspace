@@ -1,7 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
+import AboutYou from "@/components/AboutYou";
 import BondMark from "@/components/BondMark";
+import LiveGame from "@/components/live/LiveGame";
+import { pron, type Gender } from "@/lib/pronouns";
 import Composer from "@/components/chat/Composer";
 import Drawer, { DrawerItem } from "@/components/chat/Drawer";
 import Header from "@/components/chat/Header";
@@ -31,7 +34,7 @@ import {
   compressImage, forgetAllMediaUrls, forgetMediaUrl, formatBytes, mediaUrl, uploadEncrypted, type MediaPayload,
 } from "@/lib/media-client";
 import { MAX_BYTES, type Theme } from "@/lib/media-limits";
-import { countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle, type CycleData, type DayKind } from "@/lib/planner";
+import { ageOn, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, plannerAad, predictCycle, type CycleData, type DayKind } from "@/lib/planner";
 import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from "@/lib/rituals";
 import { enableNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, type Vault } from "@/lib/vault";
@@ -42,6 +45,7 @@ type Member = {
   notifications: "on" | "off" | "unknown"; lastSeenAt: string | null; lastNudgeAt: string | null;
   avatarMediaId: string | null;
   typing?: boolean;
+  gender?: Gender;
 };
 type Msg = {
   id: string; senderId: string; kind: string; viewOnce: boolean; viewedAt: string | null; deleted: boolean;
@@ -61,6 +65,7 @@ type SyncResponse = {
   now: string;
   gamesWaiting: WaitingGame[];
   statuses: StatusRow[];
+  live: { id: string; kind: "ludo" | "whot"; status: "lobby" | "playing"; createdBy: string; partnerHere: boolean } | null;
   specialDays: SpecialRow[];
   cycles: CycleRow[];
   streak: Streak;
@@ -155,6 +160,9 @@ export default function ChatPage() {
   const cameraInput = useRef<HTMLInputElement>(null);
   const [topH, setTopH] = useState(120);
   const [bottomH, setBottomH] = useState(72);
+  const [liveOpen, setLiveOpen] = useState<{ kind: "ludo" | "whot"; id?: string } | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -278,7 +286,7 @@ export default function ChatPage() {
       const q = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
-      setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [] });
+      setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [], live: data.live ?? null });
       void decryptMoods(data.moods ?? []);
       void decryptPlans(data.specialDays ?? [], data.cycles ?? []);
       void decryptStatuses(data.statuses ?? []);
@@ -783,6 +791,18 @@ export default function ChatPage() {
     return () => ro.disconnect();
   }, [hasInfo, recording]);
 
+  // "About you": asked once on this phone when it's missing (Later remembers for a week).
+  const myGender = info?.members.find((m) => m.id === info.me.id)?.gender ?? null;
+  const hasPartner = !!info?.members.some((m) => m.id !== info.me.id);
+  useEffect(() => {
+    if (!info || aboutAsked.current || myGender || !hasPartner) return;
+    aboutAsked.current = true;
+    try {
+      const later = Number(localStorage.getItem(`ourspace:about-later:${info.me.spaceId}`) || 0);
+      if (Date.now() - later > 7 * 86_400_000) setAboutOpen(true);
+    } catch { setAboutOpen(true); }
+  }, [info, myGender, hasPartner]);
+
   // Count new messages from them that arrive while you're scrolled up.
   useEffect(() => {
     const last = visible[visible.length - 1];
@@ -906,6 +926,11 @@ export default function ChatPage() {
   const nameOf = (id: string) => (id === me.id ? "You" : info.members.find((m) => m.id === id)?.name ?? partnerName);
   const gamesWaiting = info.gamesWaiting?.length > 0 && info.gamesWaiting.some((g) => g.createdBy !== me.id);
 
+  const p = pron(partner?.gender ?? null);
+  const birthdayOf = (id: string | undefined) => specials.find((d) => d.kind === "birthday" && d.aboutMember === id) ?? null;
+  const ageOf = (id: string | undefined) => { const b = birthdayOf(id); return b?.startYear ? ageOn(b.startYear, b.month, b.day, today) : null; };
+  const live = info.live;
+
   // Small glass notices under the header, instead of big banners.
   type Notice = { key: string; text: string; tone?: "gold" | "care" | "warm" | "warn"; onClick?: () => void };
   const notices: Notice[] = [];
@@ -914,8 +939,12 @@ export default function ChatPage() {
   if (streakAtRisk) notices.push({ key: "sr", text: iSentToday ? `Waiting on ${partnerName}. ${st.current}-day streak ends at midnight.` : `Your ${st.current}-day streak ends at midnight.`, tone: "warn", onClick: () => setStreakOpen(true) });
   if (gamesWaiting && partner) notices.push({ key: "gw", text: `${partner.name} started a game. Your turn.`, tone: "gold", onClick: () => setGamesOpen(true) });
   if (upcomingText) notices.push({ key: "up", text: upcomingText, tone: "gold", onClick: () => setPlannerOpen(true) });
+  if (live && !liveOpen) {
+    if (live.status === "lobby" && live.createdBy !== me.id) notices.push({ key: "live", text: `${partnerName} is waiting at the ${live.kind === "ludo" ? "Ludo" : "Whot"} table. Join now`, tone: "gold", onClick: () => setLiveOpen({ kind: live.kind, id: live.id }) });
+    else if (live.status === "playing") notices.push({ key: "live", text: `Your ${live.kind === "ludo" ? "Ludo" : "Whot"} game is waiting. Back to the table`, tone: "gold", onClick: () => setLiveOpen({ kind: live.kind, id: live.id }) });
+  }
   if (careText) notices.push({ key: "care", text: careText, tone: "care" });
-  if (partner && awayDays >= 1) notices.push({ key: "away", text: partner.notifications === "off" ? `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}, notifications off.` : `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}. Your messages will reach them.`, tone: "care" });
+  if (partner && awayDays >= 1) notices.push({ key: "away", text: partner.notifications === "off" ? `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}, notifications off.` : `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}. Your messages will reach ${p.obj}.`, tone: "care" });
   if (showInstall) notices.push({ key: "inst", text: `Add ${APP_NAME} to your Home Screen: Share, then Add to Home Screen.` });
   if (showNotifAsk) notices.push({ key: "notif", text: notif === "off" ? `Notifications are off here, and ${partnerName} can see that. Turn on` : "Turn on notifications so nudges reach you.", tone: "warn", onClick: turnOnNotifications });
   if (welcome) notices.push({ key: "wel", text: "You're in. Everything here is locked with your shared password.", onClick: () => setWelcome(false) });
@@ -945,6 +974,11 @@ export default function ChatPage() {
         <div className="dcard">
           <span className="dcard__mark">{mark(72)}</span>
           <p className="dcard__names">{host?.name ?? ""} <span>&amp;</span> {guest?.name ?? info.space.label}</p>
+          {(ageOf(host?.id) !== null || ageOf(guest?.id) !== null) && (
+            <p className="dcard__ages">
+              {[host, guest].filter(Boolean).map((m) => ageOf(m!.id) !== null ? `${m!.name}, ${ageOf(m!.id)}` : null).filter(Boolean).join("  ·  ")}
+            </p>
+          )}
           <p className="dcard__line">
             {st.current > 0 ? `${st.current} ${st.current === 1 ? "day" : "days"} in a row` : "Start your streak today"}
             {myMood ? ` · you feel ${moodOf(myMood)?.label.toLowerCase()}` : ""}
@@ -988,6 +1022,11 @@ export default function ChatPage() {
 
         {menuOpen && (
           <section className="dsettings" aria-label="Settings">
+            <div className="sheet__group">
+              <p className="sheet__title">About you</p>
+              <p className="hint">{myGender ? `${myGender === "woman" ? "Woman" : "Man"}` : "Not set"}{birthdayOf(me.id) ? ` · birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}</p>
+              <button className="btn btn--ghost" onClick={() => { setDrawerOpen(false); setAboutOpen(true); }}>Edit</button>
+            </div>
             <div className="sheet__group">
               <p className="sheet__title">Your photo</p>
               <div className="row">
@@ -1116,7 +1155,7 @@ export default function ChatPage() {
             <div className="empty">
               {partner ? <p>Nothing here yet. Say the first thing.</p> : (
                 <>
-                  <p>{info.space.label} hasn&apos;t joined yet. Send the invite link.</p>
+                  <p>{info.space.label} hasn&apos;t joined yet. Send {p.obj} the invite link.</p>
                   {me.role === "host" && !invite && <button className="btn" onClick={makeInvite}>Make an invite link</button>}
                   {invite && <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />}
                 </>
@@ -1311,11 +1350,27 @@ export default function ChatPage() {
       )}
       {gamesOpen && (
         <Games vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
-          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()} />
+          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()}
+          onLive={(kind) => { setGamesOpen(false); setLiveOpen({ kind, id: live && live.kind === kind ? live.id : undefined }); }} />
       )}
       {plannerOpen && (
         <Planner vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
           today={today} onClose={() => setPlannerOpen(false)} onChanged={() => void syncNow()} onToast={setToast} />
+      )}
+
+      {liveOpen && (
+        <LiveGame kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} />
+      )}
+      {aboutOpen && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="About you" onClick={() => setAboutOpen(false)}>
+          <div className="sheet-up glass" onClick={(e) => e.stopPropagation()}>
+            <AboutYou vault={vault} me={{ id: me.id, name: me.name }} gender={myGender} partnerName={partnerName}
+              birthday={(() => { const b = birthdayOf(me.id); return b ? { id: b.id, month: b.month, day: b.day, startYear: b.startYear } : null; })()}
+              onDone={() => { setAboutOpen(false); void syncNow(); }}
+              onLater={() => { try { localStorage.setItem(`ourspace:about-later:${me.spaceId}`, String(Date.now())); } catch { /* ignore */ } setAboutOpen(false); }}
+              onToast={setToast} />
+          </div>
+        </div>
       )}
 
       {toast && <div className="toast" role="status">{toast}</div>}

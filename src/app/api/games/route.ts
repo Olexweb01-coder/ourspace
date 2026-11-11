@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { db } from "@/lib/db";
 import { pushTo, type PushPayload } from "@/lib/push";
 import { B64_RE, fail, json, readJson, UUID_RE } from "@/lib/server-utils";
+import { pron, type Gender } from "@/lib/pronouns";
 import { getMe, getPartnerId } from "@/lib/session";
 
 const TITLES: Record<string, string> = { wyr: "Would you rather", tot: "This or that", know: "How well do you know me" };
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
     notice = {
       to: partnerId,
       payload: b.kind === "know"
-        ? { title: `🎲 How well do you know ${me.name}?`, body: `${me.name} made a quiz about themselves. Your turn to guess.`, tag: "game" }
+        ? { title: `🎲 How well do you know ${me.name}?`, body: `${me.name} made a quiz about ${pron(((await sql`select gender from members where id = ${me.memberId}`)[0]?.gender ?? null) as Gender).self}. Your turn to guess.`, tag: "game" }
         : { title: `🎲 ${me.name} wants to play ${TITLES[b.kind]}`, body: "Your turn. Answer and see how you match.", tag: "game" },
     };
   } else if (b.action === "answer") {

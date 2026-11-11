@@ -20,8 +20,9 @@ type Body = {
 export async function GET() {
   const me = await getMe();
   const count = (await db()`select count(*)::int as n from spaces`)[0].n as number;
-  if (me?.role === "host") return json({ mode: "host", name: me.name, used: count, max: MAX_SPACES });
   const isSet = await hostPasswordIsSet();
+  // Signed in as the host: your name is known, but the host password is still always asked for.
+  if (me?.role === "host") return json({ mode: "host", name: me.name, used: count, max: MAX_SPACES, hostPasswordSet: isSet });
   if (isSet) return json({ mode: "password" });
   return json({ mode: count === 0 ? "create" : "settings" });
 }
@@ -32,7 +33,8 @@ export async function POST(req: Request) {
   const me = await getMe();
   const isHost = me?.role === "host";
 
-  if (!isHost) {
+  // Every new space needs the host password, signed in or not.
+  {
     const hostPassword = typeof body.hostPassword === "string" ? body.hostPassword : "";
     if (typeof body.recoveryKey === "string" && body.recoveryKey) {
       // Emergency reset: the long setup key from Vercel, plus a new host password.
@@ -42,8 +44,8 @@ export async function POST(req: Request) {
       await setHostPassword(hostPassword);
     } else if (!(await hostPasswordIsSet())) {
       const count = (await db()`select count(*)::int as n from spaces`)[0].n as number;
-      if (count > 0) return fail("Set your host password first: open your space, then Settings, then Host password.", 403);
-      // The very first space: whoever creates it chooses the host password.
+      if (count > 0 && !isHost) return fail("Set your host password first: open your space, then Settings, then Host password.", 403);
+      // The very first space, or the signed-in host who hasn't chosen one yet: choose it now.
       if (hostPassword.length < HOST_PASSWORD_MIN) return fail(`Choose a host password of at least ${HOST_PASSWORD_MIN} characters.`);
       await setHostPassword(hostPassword);
     } else {

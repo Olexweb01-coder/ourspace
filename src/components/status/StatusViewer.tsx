@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { mediaUrl } from "@/lib/media-client";
-import { STATUS_BGS, timeAgo, type StatusItem } from "@/lib/status";
+import { fontStyle, STATUS_BGS, timeAgo, type StatusItem } from "@/lib/status";
 import type { Vault } from "@/lib/vault";
 
 type Props = {
@@ -86,7 +86,7 @@ export default function StatusViewer({ items, ownerName, mine, partnerName, vaul
       {!p ? <div className="story__body"><p className="story__text">This status couldn&apos;t be unlocked.</p></div>
         : p.t === "text" ? (
           <div className="story__body" style={{ background: STATUS_BGS[p.bg] ?? STATUS_BGS[0] }}>
-            <p className="story__text">{p.text}</p>
+            <p className="story__text" style={fontStyle(p.font)}>{p.text}</p>
           </div>
         ) : (
           <div className="story__body story__body--photo" style={p.thumb ? { backgroundImage: `url(${p.thumb})` } : undefined}>

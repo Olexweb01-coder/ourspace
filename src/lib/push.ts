@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { db } from "./db";
+import { ALWAYS_TAGS, categoryOf, IN_APP_QUIET_TAGS, IN_APP_SECONDS, QUIET_FROM, QUIET_TO } from "./notify-prefs";
 
 let configured: boolean | null = null;
 
@@ -27,6 +28,7 @@ export type PushPayload = { title: string; body: string; tag?: string; url?: str
 export async function pushTo(memberId: string | null, payload: PushPayload): Promise<void> {
   if (!memberId || !configure()) return;
   const sql = db();
+  if (!(await wants(memberId, payload.tag))) return;
   const subs = await sql`select endpoint, p256dh, auth from push_subscriptions where member_id = ${memberId}`;
   if (subs.length === 0) return;
 
@@ -54,4 +56,23 @@ export async function pushTo(memberId: string | null, payload: PushPayload): Pro
   if (left[0].n === 0) {
     await sql`update members set notifications = 'off' where id = ${memberId}`;
   }
+}
+
+/** Respects each person's choices: kinds they turned off, and quiet hours (11 pm to 7 am their time). */
+async function wants(memberId: string, tag: string | undefined): Promise<boolean> {
+  if (tag && ALWAYS_TAGS.includes(tag)) return true;
+  const rows = await db()`select notify_off, notify_quiet, timezone,
+                                 coalesce(last_seen_at > now() - make_interval(secs => ${IN_APP_SECONDS}), false) as in_app
+                          from members where id = ${memberId}`;
+  const m = rows[0];
+  if (!m) return false;
+  if (m.in_app && tag && IN_APP_QUIET_TAGS.includes(tag)) return false;   // already looking at the app
+  const cat = categoryOf(tag);
+  if (cat && (m.notify_off as string[] | null)?.includes(cat)) return false;
+  if (m.notify_quiet) {
+    let hour = 12;
+    try { hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone: m.timezone || "Africa/Lagos" }).format(new Date())); } catch { /* keep midday */ }
+    if (hour >= QUIET_FROM || hour < QUIET_TO) return false;
+  }
+  return true;
 }

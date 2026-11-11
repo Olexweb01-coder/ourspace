@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     since
       // 3s overlap so commits that raced the last cursor are never missed; client de-dupes by id.
       ? sql`select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
-              msg.reactions, msg.expires_at, msg.created_at, msg.media_id,
+              msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.media_id,
               case when msg.deleted then null else msg.iv end as iv,
               case when msg.deleted then null else msg.ciphertext end as ciphertext,
               md.kept_by as media_kept_by, md.expires_at as media_expires_at,
@@ -32,7 +32,7 @@ export async function GET(req: Request) {
             order by msg.updated_at asc limit 500`
       : sql`select * from (
               select msg.id::text as id, msg.sender_id, msg.kind, msg.view_once, msg.viewed_at, msg.deleted,
-                msg.reactions, msg.expires_at, msg.created_at, msg.media_id,
+                msg.reactions, msg.expires_at, msg.created_at, msg.edited_at, msg.media_id,
                 case when msg.deleted then null else msg.iv end as iv,
                 case when msg.deleted then null else msg.ciphertext end as ciphertext,
                 md.kept_by as media_kept_by, md.expires_at as media_expires_at,
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
               where msg.space_id = ${me.spaceId}
               order by msg.id desc limit 150) t
             order by id::bigint asc`,
-    sql`select id, role, display_name, banned, notifications, last_seen_at, last_nudge_at, avatar_media_id,
+    sql`select id, role, display_name, banned, notifications, notify_off, notify_quiet, last_seen_at, last_nudge_at, avatar_media_id,
           (typing_until > now()) as typing, gender
         from members where space_id = ${me.spaceId}`,
     sql`select label, disappear_seconds, theme, background_media_id, best_streak from spaces where id = ${me.spaceId}`,
@@ -86,6 +86,8 @@ export async function GET(req: Request) {
       name: m.display_name,
       banned: m.banned,
       notifications: m.notifications,
+      notifyOff: m.notify_off ?? [],
+      notifyQuiet: m.notify_quiet === true,
       lastSeenAt: m.last_seen_at,
       lastNudgeAt: m.last_nudge_at,
       avatarMediaId: m.avatar_media_id,
@@ -124,6 +126,7 @@ export async function GET(req: Request) {
       reactions: r.reactions ?? {},
       expiresAt: r.expires_at,
       createdAt: r.created_at,
+      editedAt: r.edited_at ?? null,
       iv: r.iv,
       ct: r.ciphertext,
       media: r.media_id

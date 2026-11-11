@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import AboutYou from "@/components/AboutYou";
+import { NotifPrompt, NotifySettings } from "@/components/Notifications";
 import SpaceSwitcher from "@/components/SpaceSwitcher";
 import BondMark from "@/components/BondMark";
 
@@ -41,17 +42,19 @@ import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from
 import { enableNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, savedSpaces, type Vault } from "@/lib/vault";
 
-type Reaction = "love" | "angry";
+type Reaction = string;   // "love", "angry", or any single emoji
 type Member = {
   id: string; role: "host" | "partner"; name: string; banned: boolean;
   notifications: "on" | "off" | "unknown"; lastSeenAt: string | null; lastNudgeAt: string | null;
   avatarMediaId: string | null;
   typing?: boolean;
   gender?: Gender;
+  notifyOff?: string[];
+  notifyQuiet?: boolean;
 };
 type Msg = {
   id: string; senderId: string; kind: string; viewOnce: boolean; viewedAt: string | null; deleted: boolean;
-  reactions: Record<string, Reaction>; expiresAt: string | null; createdAt: string; iv: string | null; ct: string | null;
+  reactions: Record<string, Reaction>; expiresAt: string | null; createdAt: string; editedAt?: string | null; iv: string | null; ct: string | null;
   media: MediaState;
 };
 type Space = { label: string; disappearSeconds: number | null; theme: Theme; backgroundMediaId: string | null };
@@ -110,6 +113,8 @@ export default function ChatPage() {
   const [info, setInfo] = useState<Info | null>(null);
   const [msgs, setMsgs] = useState<Map<string, Msg>>(() => new Map());
   const payloads = useRef(new Map<string, Payload | null>());
+  const payloadIv = useRef(new Map<string, string>());   // which encrypted version each message was decrypted from
+  const EDIT_MS = 15 * 60 * 1000;
   const [, bump] = useReducer((x: number) => x + 1, 0);
 
   const cursor = useRef<string | null>(null);
@@ -150,6 +155,7 @@ export default function ChatPage() {
   const [lockSetupOpen, setLockSetupOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [reply, setReply] = useState<ReplyRef | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);   // id of the message being edited
   const [menuFor, setMenuFor] = useState<{ m: Msg; rect: DOMRect } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<StatusItem[]>([]);
@@ -173,6 +179,8 @@ export default function ChatPage() {
   };
   const [aboutOpen, setAboutOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
+  const [notifPrompt, setNotifPrompt] = useState(false);
+  const notifAsked = useRef(false);
   const [canSwitch, setCanSwitch] = useState(false);
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
@@ -217,7 +225,8 @@ export default function ChatPage() {
   const decryptList = useCallback(async (list: Msg[]) => {
     const v = vaultRef.current;
     if (!v) return;
-    const todo = list.filter((m) => !m.deleted && !m.viewOnce && m.iv && m.ct && !payloads.current.has(m.id));
+    // Decrypt new messages, and again whenever a message's encrypted words change (an edit).
+    const todo = list.filter((m) => !m.deleted && !m.viewOnce && m.iv && m.ct && payloadIv.current.get(m.id) !== m.iv);
     if (todo.length === 0) return;
     await Promise.all(todo.map(async (m) => {
       try {
@@ -226,6 +235,7 @@ export default function ChatPage() {
       } catch {
         payloads.current.set(m.id, null);
       }
+      payloadIv.current.set(m.id, m.iv as string);
     }));
     bump();
   }, []);
@@ -489,6 +499,7 @@ export default function ChatPage() {
       body: { iv, ct, viewOnce: sentOnce, kind: payload.t, mediaId },
     });
     payloads.current.set(res.id, payload);
+    payloadIv.current.set(res.id, iv);
     addLocal(v, res.id, payload.t, res, iv, ct, sentOnce, mediaId);
     setViewOnce(false);
     setReply(null);
@@ -501,6 +512,7 @@ export default function ChatPage() {
     if (!vaultRef.current || !body || sending) return;
     setSending(true);
     try {
+      if (editing) { await saveEdit(editing, body); return; }
       await postMessage({ t: "text", body });
       setDraft("");
     } catch (err) {
@@ -816,6 +828,22 @@ export default function ChatPage() {
     } catch { setAboutOpen(true); }
   }, [info, myGender, hasPartner]);
 
+  // Ask to turn on notifications each time the app opens while they're off: straight away, before you start anything.
+  // If you've already started typing or tapping, it never jumps in front of you; it waits for the next open.
+  const interacted = useRef(false);
+  useEffect(() => {
+    const mark = () => { interacted.current = true; };
+    window.addEventListener("pointerdown", mark, { once: true, capture: true });
+    window.addEventListener("keydown", mark, { once: true, capture: true });
+    return () => { window.removeEventListener("pointerdown", mark, true); window.removeEventListener("keydown", mark, true); };
+  }, []);
+  useEffect(() => {
+    if (notifAsked.current || notif === "on" || !hasPartner || aboutOpen) return;
+    notifAsked.current = true;
+    if (!interacted.current && !draft) setNotifPrompt(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notif, hasPartner, aboutOpen]);
+
   // Count new messages from them that arrive while you're scrolled up.
   useEffect(() => {
     const last = visible[visible.length - 1];
@@ -850,7 +878,40 @@ export default function ChatPage() {
     return `${NOUN[p.t]}${cap}`;
   }
 
+  const canEdit = (m: Msg) =>
+    !!me && m.senderId === me.id && m.kind === "text" && !m.viewOnce && !m.deleted &&
+    payloads.current.get(m.id)?.t === "text" && Date.now() - new Date(m.createdAt).getTime() < EDIT_MS;
+
+  function startEdit(m: Msg) {
+    const p = payloads.current.get(m.id);
+    setMenuFor(null);
+    if (!p || p.t !== "text") return;
+    setReply(null);
+    setEditing(m.id);
+    setDraft(p.body);
+    setTimeout(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 50);
+  }
+  function cancelEdit() { setEditing(null); setDraft(""); }
+
+  async function saveEdit(id: string, body: string) {
+    const v = vaultRef.current;
+    const m = msgs.get(id);
+    const old = payloads.current.get(id);
+    if (!v || !m || !old || old.t !== "text") return cancelEdit();
+    if (old.body === body) return cancelEdit();
+    const payload: Payload = { ...old, body };
+    const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
+    const res = await api<{ editedAt: string }>(`/api/messages/${id}/edit`, { body: { iv, ct } });
+    payloads.current.set(id, payload);
+    payloadIv.current.set(id, iv);
+    setMsgs((prev) => { const next = new Map(prev); const cur = next.get(id); if (cur) next.set(id, { ...cur, iv, ct, editedAt: res.editedAt }); return next; });
+    setEditing(null);
+    setDraft("");
+    void syncNow();
+  }
+
   function startReply(m: Msg) {
+    if (editing) cancelEdit();
     setReply({ id: m.id, from: m.senderId, preview: previewOf(m) });
     setMenuFor(null);
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -955,6 +1016,9 @@ export default function ChatPage() {
   if (live && !liveOpen) {
     if (live.status === "lobby" && live.createdBy !== me.id) notices.push({ key: "live", text: `${partnerName} is waiting at the ${live.kind === "ludo" ? "Ludo" : "Whot"} table. Join now`, tone: "gold", onClick: () => setLiveOpen({ kind: live.kind, id: live.id }) });
     else if (live.status === "playing") notices.push({ key: "live", text: `Your ${live.kind === "ludo" ? "Ludo" : "Whot"} game is waiting. Back to the table`, tone: "gold", onClick: () => setLiveOpen({ kind: live.kind, id: live.id }) });
+  }
+  if (partner && partner.notifications !== "off" && partner.notifyOff?.includes("messages")) {
+    notices.push({ key: "pmute", text: `${partner.name}'s notifications are off for messages. Your words will wait for ${p.obj} in the app.`, tone: "warn" });
   }
   if (careText) notices.push({ key: "care", text: careText, tone: "care" });
   if (partner && awayDays >= 1) notices.push({ key: "away", text: partner.notifications === "off" ? `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}, notifications off.` : `${partner.name} has been away ${awayDays} ${awayDays === 1 ? "day" : "days"}. Your messages will reach ${p.obj}.`, tone: "care" });
@@ -1118,6 +1182,7 @@ export default function ChatPage() {
                   mine={mine}
                   groupStart={groupStart}
                   time={timeOf(m.createdAt)}
+                  edited={!!m.editedAt}
                   disappears={!!m.expiresAt}
                   ticks={mine && !m.viewOnce ? (seen ? "seen" : "sent") : "none"}
                   reply={payload && "reply" in payload && payload.reply ? payload.reply : null}
@@ -1203,6 +1268,8 @@ export default function ChatPage() {
               onCamera={() => cameraInput.current?.click()}
               onRecord={() => setRecording(true)}
               onEmoji={(e) => setDraft((d) => d + e)}
+              editing={editing ? { preview: (() => { const p = payloads.current.get(editing); return p && p.t === "text" ? p.body : ""; })() } : null}
+              onCancelEdit={cancelEdit}
               reply={reply ? { name: nameOf(reply.from) === "You" ? "yourself" : nameOf(reply.from), preview: reply.preview } : null}
               onCancelReply={() => setReply(null)}
             />
@@ -1227,6 +1294,8 @@ export default function ChatPage() {
           onReact={(r) => react(menuFor.m, r)}
           onReply={() => startReply(menuFor.m)}
           onCopy={() => copyMessage(menuFor.m)}
+          canEdit={canEdit(menuFor.m)}
+          onEdit={() => startEdit(menuFor.m)}
           onClose={() => setMenuFor(null)}
         />
       )}
@@ -1361,9 +1430,10 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="sheet__group">
-              <p className="sheet__title">Notifications on this phone</p>
-              {notif === "on" ? <p className="hint">On. {partnerName} will see if you turn them off.</p>
-                : <button className="btn btn--ghost" onClick={turnOnNotifications}>Turn on notifications</button>}
+              <p className="sheet__title">Notifications</p>
+              <NotifySettings state={notif} off={info.members.find((m) => m.id === me.id)?.notifyOff ?? []}
+                quiet={info.members.find((m) => m.id === me.id)?.notifyQuiet ?? false} partnerName={partnerName}
+                onTurnOn={turnOnNotifications} onToast={setToast} />
             </div>
             {me.role === "host" && (
               <>
@@ -1389,6 +1459,11 @@ export default function ChatPage() {
 
       {liveOpen && (
         <LiveGame vault={vault} kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} />
+      )}
+      {notifPrompt && notif !== "on" && (
+        <NotifPrompt partnerName={partnerName} partnerPossessive={p.pos} needsHomeScreen={isIOS() && !isStandalone()}
+          onTurnOn={async () => { await turnOnNotifications(); setNotifPrompt(false); }}
+          onNotNow={() => { setNotifPrompt(false); void api("/api/push/status", { body: { state: "off" } }).catch(() => {}); }} />
       )}
       {switchOpen && <SpaceSwitcher currentSpaceId={me.spaceId} isHost={me.role === "host"} onClose={() => setSwitchOpen(false)} />}
       {aboutOpen && (

@@ -40,6 +40,7 @@ export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "
   const [soundOpen, setSoundOpen] = useState(false);
   const [use3d] = useState(() => typeof window !== "undefined" && webglAvailable());
   const busyRef = useRef(false);
+  const [trouble, setTrouble] = useState(0);   // failed checks in a row (weak network or server problem)
   const prev = useRef<View | null>(null);
   const musicStarted = useRef(false);
 
@@ -54,8 +55,11 @@ export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "
 
   const refresh = useCallback(async () => {
     if (!id || busyRef.current) return;
-    try { setView(await api<View>(`/api/live/${id}`)); }
-    catch (err) { if (err instanceof ApiError && err.status === 404) { onToast("This game has ended."); onClose(); } }
+    try { setView(await api<View>(`/api/live/${id}`)); setTrouble(0); }
+    catch (err) {
+      if (err instanceof ApiError && err.status === 404) { onToast("This game has ended."); onClose(); return; }
+      setTrouble((n) => n + 1);   // keep trying quietly; explain after a few misses
+    }
   }, [id, onClose, onToast]);
 
   useEffect(() => {
@@ -184,10 +188,12 @@ export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "
   }
 
   let status = "";
-  if (!view) status = "Setting the table…";
+  if (trouble >= 4) status = "Can't reach the game table right now. Still trying…";
+  else if (!view) status = "Setting the table…";
   else if (view.status === "lobby") status = !partner?.present ? `Waiting for ${pname} to join. ${partnerPronoun === "They" ? "They've" : `${partnerPronoun}'s`} been notified.`
     : view.ready.includes(meId) ? (view.ready.length === 2 ? "Starting…" : `Waiting for ${pname} to be ready`) : "Choose the rules and your bet, then tap Ready";
   else if (over) status = winner === meId ? "You won!" : winner ? `${pname} won.` : "It's a tie.";
+  else if (trouble >= 4) status = "Weak connection. Your moves will go through when it's back.";
   else if (!bothHere) status = `Paused. Waiting for ${pname} to come back.`;
   else status = myTurn ? "Your turn" : `${pname}'s turn`;
 
@@ -286,7 +292,17 @@ export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "
           )}
         </div>
       )}
-      {!view && <div className="live__lobby"><span className="live__pulse" aria-hidden="true" /></div>}
+      {!view && (
+        <div className="live__lobby">
+          <span className="live__pulse" aria-hidden="true" />
+          {trouble >= 4 && (
+            <>
+              <p className="hint">Check your connection. If it keeps happening, the table may need an update on the server.</p>
+              <button type="button" className="btn btn--ghost" onClick={() => { setTrouble(0); void refresh(); }}>Try again</button>
+            </>
+          )}
+        </div>
+      )}
 
       {over && s && (
         <div className="live__result glass">

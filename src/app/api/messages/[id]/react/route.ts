@@ -1,3 +1,4 @@
+import { isOneEmoji } from "@/lib/emoji";
 import { after } from "next/server";
 import { db } from "@/lib/db";
 import { pushTo } from "@/lib/push";
@@ -12,7 +13,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const body = await readJson<{ reaction?: string | null }>(req);
   const reaction = body?.reaction ?? null;
-  if (reaction !== null && reaction !== "love" && reaction !== "angry") return fail("Only love or angry.");
+  if (reaction !== null && reaction !== "love" && reaction !== "angry" && !isOneEmoji(reaction)) return fail("React with one emoji.");
 
   const rows = await db()`
     update messages set
@@ -28,7 +29,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (reaction && senderId !== me.memberId) {
     after(() => pushTo(senderId, reaction === "love"
       ? { title: `❤️ ${me.name}`, body: "Loved your message.", tag: "reaction" }
-      : { title: `😠 ${me.name}`, body: "Is angry about your message. Go talk.", tag: "reaction" }));
+      : reaction === "angry"
+        ? { title: `😠 ${me.name}`, body: "Is angry about your message. Go talk.", tag: "reaction" }
+        : { title: `${reaction} ${me.name}`, body: `Reacted ${reaction} to your message.`, tag: "reaction" }));
   }
   return json({ ok: true });
 }

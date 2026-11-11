@@ -353,3 +353,10 @@ create table if not exists auth_throttle (
   locked_until  timestamptz,
   updated_at    timestamptz not null default now()
 );
+
+-- ===== Editing messages (same as db/012_edit_messages.sql) =====
+alter table messages add column if not exists edited_at timestamptz;
+
+-- ===== Notification choices (same as db/013_notification_choices.sql) =====
+alter table members add column if not exists notify_off text[] not null default '{}';
+alter table members add column if not exists notify_quiet boolean not null default false;

@@ -20,12 +20,26 @@ type Props = {
   onEmoji: (e: string) => void;
   reply: { name: string; preview: string } | null;
   onCancelReply: () => void;
+  editing?: { preview: string } | null;
+  onCancelEdit?: () => void;
 };
 
 export default function Composer(p: Props) {
   return (
     <div className="composer2">
-      {p.reply && (
+      {p.editing && (
+        <div className="replybar replybar--edit glass">
+          <span className="replybar__line" aria-hidden="true" />
+          <span className="replybar__text">
+            <strong>Editing message</strong>
+            <span>{p.editing.preview}</span>
+          </span>
+          <button type="button" className="icon-btn" onClick={p.onCancelEdit} aria-label="Cancel editing">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z" /></svg>
+          </button>
+        </div>
+      )}
+      {p.reply && !p.editing && (
         <div className="replybar glass">
           <span className="replybar__line" aria-hidden="true" />
           <span className="replybar__text">

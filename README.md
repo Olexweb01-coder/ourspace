@@ -132,6 +132,15 @@ The switch goes through `/hop` so the chat starts fresh; nothing carries over be
 Partners never see the switcher. Settings is its own page.
 Setup: run `db/011_sign_in_guard.sql` once in Neon.
 
+## Editing, notifications, emoji, status styles
+- **Edit** your own text messages within 15 minutes (long-press, Edit). Shown as "edited"; re-encrypted like the original.
+- **Notifications:** a pop-up each time the app opens while they're off; Settings lets you choose kinds
+  (messages, statuses, feelings, games, special days, streak) and quiet hours (11 pm to 7 am). Nudges and calls always come.
+  No buzz for messages and similar while you're looking at the app. Turning message notifications off or on tells your partner.
+- **Emoji:** every emoji is kept. Reactions: quick row plus any emoji (the server accepts exactly one emoji).
+- **Status styles:** five fonts and fourteen colours for text statuses.
+Setup: run `db/012_edit_messages.sql` and `db/013_notification_choices.sql` once in Neon.
+
 ## Layers and computer layout
 On a computer (960px and wider) the side panel stays open, so pages and sheets open in the chat area beside it and
 only one page is open at a time. Full-screen moments (celebrations, photo viewer, view once, statuses, live games)

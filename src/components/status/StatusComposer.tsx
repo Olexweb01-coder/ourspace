@@ -4,7 +4,7 @@ import { api, ApiError } from "@/lib/api";
 import { encryptJSON } from "@/lib/crypto-client";
 import { onlyLoveAndAngry } from "@/lib/emoji";
 import { compressImage, uploadEncrypted } from "@/lib/media-client";
-import { STATUS_BGS, statusAad, type StatusPayload } from "@/lib/status";
+import { fontStyle, STATUS_BGS, STATUS_FONTS, statusAad, type StatusPayload } from "@/lib/status";
 import type { Vault } from "@/lib/vault";
 
 type Props = { vault: Vault; partnerName: string; onClose: () => void; onPosted: () => void; onToast: (m: string) => void };
@@ -14,6 +14,7 @@ export default function StatusComposer({ vault, partnerName, onClose, onPosted, 
   const [mode, setMode] = useState<"text" | "photo">("text");
   const [text, setText] = useState("");
   const [bg, setBg] = useState(0);
+  const [font, setFont] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
@@ -41,7 +42,7 @@ export default function StatusComposer({ vault, partnerName, onClose, onPosted, 
       } else {
         const t = onlyLoveAndAngry(text).trim();
         if (!t) return;
-        payload = { t: "text", text: t, bg };
+        payload = { t: "text", text: t, bg, font };
       }
       const { iv, ct } = await encryptJSON(vault.encKey, payload, statusAad(vault.spaceId, id));
       await api("/api/status", { body: { action: "post", id, iv, ct, mediaId } });
@@ -65,12 +66,21 @@ export default function StatusComposer({ vault, partnerName, onClose, onPosted, 
           <button type="button" className={mode === "text" ? "chip chip--on" : "chip"} onClick={() => setMode("text")}>Words</button>
           <button type="button" className={mode === "photo" ? "chip chip--on" : "chip"} onClick={() => setMode("photo")}>Photo</button>
         </div>
-        <span style={{ width: 40 }} />
+        {mode === "text" ? (
+          <div className="story-tools">
+            <button type="button" className="story-tool" onClick={() => setFont((f) => (f + 1) % STATUS_FONTS.length)}
+              aria-label={`Font: ${STATUS_FONTS[font].name}. Tap for the next font`} style={{ fontFamily: STATUS_FONTS[font].family, fontStyle: STATUS_FONTS[font].italic ? "italic" : "normal" }}>T</button>
+            <button type="button" className="story-tool" onClick={() => setBg((b) => (b + 1) % STATUS_BGS.length)} aria-label="Next colour">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18c.8 0 1.5-.7 1.5-1.5 0-.4-.1-.7-.4-1-.2-.3-.4-.6-.4-1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" /></svg>
+            </button>
+          </div>
+        ) : <span style={{ width: 40 }} />}
       </div>
 
       {mode === "text" ? (
         <div className="story-canvas" style={{ background: STATUS_BGS[bg] }}>
-          <textarea className="story-canvas__input" value={text} maxLength={300} autoFocus
+          <span className="story-fontname" aria-live="polite">{STATUS_FONTS[font].name}</span>
+          <textarea className="story-canvas__input" style={fontStyle(font)} value={text} maxLength={300} autoFocus
             placeholder={`Something for ${partnerName}…`} onChange={(e) => setText(onlyLoveAndAngry(e.target.value))} />
         </div>
       ) : (

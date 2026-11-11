@@ -5,10 +5,10 @@ import { ApiError } from "@/lib/api";
 import { LOCK_LABEL, setUpLock, validLock, type LockKind } from "@/lib/applock";
 import type { Vault } from "@/lib/vault";
 
-type Props = { vault: Vault; partnerName?: string; onDone: (kind: LockKind) => void; onSkip?: () => void; skipLabel?: string };
+type Props = { vault: Vault; partnerName?: string; partnerPos?: string; onDone: (kind: LockKind) => void; onSkip?: () => void; skipLabel?: string };
 
 // Choose a PIN, pattern or password, enter it twice, done.
-export default function LockSetup({ vault, partnerName, onDone, onSkip, skipLabel = "Not now" }: Props) {
+export default function LockSetup({ vault, partnerName, partnerPos = "their", onDone, onSkip, skipLabel = "Not now" }: Props) {
   const [kind, setKind] = useState<LockKind>("pin");
   const [first, setFirst] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +64,7 @@ export default function LockSetup({ vault, partnerName, onDone, onSkip, skipLabe
         busy={busy} submitLabel={first === null ? "Next" : "Save"} onSubmit={enter} />
       {error && <p className="error" role="alert">{error}</p>}
       {partnerName && first === null && (
-        <p className="hint">{partnerName} sets their own on their phone. You can choose the same one or different ones, whatever feels right for you two.</p>
+        <p className="hint">{partnerName} sets {partnerPos} own on {partnerPos} phone. You can choose the same one or different ones, whatever feels right for you two.</p>
       )}
       {onSkip && <button type="button" className="quiet-link link-btn--quiet" onClick={onSkip}>{skipLabel}</button>}
     </div>

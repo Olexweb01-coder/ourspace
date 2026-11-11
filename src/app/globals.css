@@ -1134,3 +1134,22 @@ button.notice { cursor: pointer; }
   .planner { max-width: none; margin: 0; }
   .planner > * { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
 }
+
+/* ---------- front door ---------- */
+.doors { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 10px; margin: 6px 0 4px; }
+.door {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; border-radius: 20px; text-align: left;
+  border: 1px solid rgba(246, 201, 127, 0.18); background: rgba(255, 255, 255, 0.05); color: var(--blush); font: inherit; text-decoration: none;
+  transition: transform 0.15s, background 0.15s;
+}
+.door:hover, .door:focus-visible { background: rgba(255, 255, 255, 0.09); transform: translateY(-1px); }
+.door span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.door strong { font-size: 1.05rem; }
+.door small { color: var(--muted); font-size: 0.82rem; }
+.door__icon { width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; font-size: 1.2rem; color: var(--ink); background: linear-gradient(135deg, var(--candle), var(--rose)); }
+.door--quiet { border-style: dashed; background: transparent; }
+.door--quiet .door__icon { background: rgba(255, 255, 255, 0.08); color: var(--candle); }
+.gate__form .field + .field { margin-top: 8px; }
+
+/* Boxes in the middle of the screen scroll when the screen is short, instead of cutting off. */
+.lock-modal { max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }

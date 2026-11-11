@@ -166,9 +166,9 @@ export default function ChatPage() {
   const [bottomH, setBottomH] = useState(72);
   const [liveOpen, setLiveOpen] = useState<{ kind: "ludo" | "whot"; id?: string } | null>(null);
   // One page at a time: opening one closes the others (on a computer the side panel stays open, so this matters).
-  const openOnly = (page: "mood" | "planner" | "games" | "streak" | "about") => {
+  const openOnly = (page: "mood" | "planner" | "games" | "streak" | "about" | "settings") => {
     setMoodOpen(page === "mood"); setPlannerOpen(page === "planner"); setGamesOpen(page === "games");
-    setStreakOpen(page === "streak"); setAboutOpen(page === "about"); setDrawerOpen(false);
+    setStreakOpen(page === "streak"); setAboutOpen(page === "about"); setMenuOpen(page === "settings"); setDrawerOpen(false);
   };
   const [aboutOpen, setAboutOpen] = useState(false);
   const aboutAsked = useRef(false);
@@ -1025,93 +1025,9 @@ export default function ChatPage() {
             icon={<svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>} />
           <DrawerItem label="Our streak" hint={`${st.current} now · longest ${st.best}`} onClick={() => openOnly("streak")}
             icon={<svg viewBox="0 0 24 24"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>} />
-          <DrawerItem label="Settings" hint="Photo, theme, lock, storage and more" onClick={() => setMenuOpen((o) => !o)}
+          <DrawerItem label="Settings" hint="Photo, theme, lock, storage and more" onClick={() => openOnly("settings")}
             icon={<svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)" /></svg>} />
         </div>
-
-        {menuOpen && (
-          <section className="dsettings" aria-label="Settings">
-            <div className="sheet__group">
-              <p className="sheet__title">About you</p>
-              <p className="hint">{myGender ? `${myGender === "woman" ? "Woman" : "Man"}` : "Not set"}{birthdayOf(me.id) ? ` · birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}</p>
-              <button className="btn btn--ghost" onClick={() => openOnly("about")}>Edit</button>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Your photo</p>
-              <div className="row">
-                <button className="btn btn--ghost" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
-                  {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change photo" : "Add a photo"}
-                </button>
-                {myAvatar && <button className="btn btn--ghost" onClick={removeAvatar}>Remove</button>}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Theme</p>
-              <div className="chips chips--left">
-                {THEME_OPTIONS.map((t) => (
-                  <button key={t.value} className={t.value === info.space.theme ? "chip chip--on" : "chip"} onClick={() => saveSettings({ theme: t.value }, `${t.label} theme on`)}>{t.label}</button>
-                ))}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Chat background</p>
-              <div className="row">
-                <button className="btn btn--ghost" onClick={() => backgroundInput.current?.click()} disabled={busySetting === "background"}>
-                  {busySetting === "background" ? "Uploading…" : info.space.backgroundMediaId ? "Change background" : "Choose a photo"}
-                </button>
-                {info.space.backgroundMediaId && <button className="btn btn--ghost" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Disappearing messages</p>
-              <div className="chips chips--left">
-                {DISAPPEAR_OPTIONS.map((o) => (
-                  <button key={o.label} className={o.value === disappear.value ? "chip chip--on" : "chip"}
-                    onClick={() => saveSettings({ disappearSeconds: o.value }, o.value === null ? "Messages stay" : "New messages will disappear")}>{o.label}</button>
-                ))}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Storage</p>
-              {usage ? (
-                <>
-                  <div className="meter" role="img" aria-label={`${usedPct}% of storage used`}><span style={{ width: `${usedPct}%` }} /></div>
-                  <p className="hint">{formatBytes(usage.totalBytes)} of {formatBytes(usage.limitBytes)} used, {formatBytes(usage.keptBytes)} kept. Uploads this month: {usage.uploadsThisMonth} of {usage.uploadLimit.toLocaleString()}.</p>
-                </>
-              ) : <p className="hint">Checking…</p>}
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">App lock on this phone</p>
-              <p className="hint">{lockKind ? `Opens with your ${LOCK_LABEL[lockKind].toLowerCase()}.` : "Off. You type the shared password each time."}</p>
-              <div className="row">
-                <button className="btn btn--ghost" onClick={() => { setDrawerOpen(false); setLockSetupOpen(true); }}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
-                {lockKind && <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Notifications on this phone</p>
-              {notif === "on" ? <p className="hint">On. {partnerName} will see if you turn them off.</p>
-                : <button className="btn btn--ghost" onClick={turnOnNotifications}>Turn on notifications</button>}
-            </div>
-            {me.role === "host" && (
-              <>
-                <div className="sheet__group">
-                  <p className="sheet__title">Invite link</p>
-                  {invite ? <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />
-                    : <button className="btn btn--ghost" onClick={makeInvite}>{partner ? `Make a link for ${partner.name}'s new phone` : "Make an invite link"}</button>}
-                </div>
-                <div className="sheet__group">
-                  <p className="sheet__title">Another space</p>
-                  <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
-                </div>
-                <div className="sheet__group">
-                  <p className="sheet__title">Host password</p>
-                  <HostPasswordForm onToast={setToast} />
-                </div>
-              </>
-            )}
-          </section>
-        )}
 
         <div className="dsec dsec--foot">
           <button className="btn btn--ghost btn--wide" onClick={lockNow}>Lock now</button>
@@ -1351,7 +1267,7 @@ export default function ChatPage() {
         <div className="modal modal--center" role="dialog" aria-modal="true" aria-label="App lock">
           <div className="lock-modal">
             <p className="sheet__title">{lockKind ? "Change your app lock" : "Set your app lock"}</p>
-            <LockSetup vault={vault} partnerName={partner?.name}
+            <LockSetup vault={vault} partnerName={partner?.name} partnerPos={p.pos}
               onDone={(k) => { setLockKind(k); setLockSetupOpen(false); setToast(`${LOCK_LABEL[k]} set. Use it next time you open the app.`); }}
               onSkip={() => setLockSetupOpen(false)} skipLabel="Cancel" />
           </div>
@@ -1366,6 +1282,98 @@ export default function ChatPage() {
       {plannerOpen && (
         <Planner vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
           today={today} onClose={() => setPlannerOpen(false)} onChanged={() => void syncNow()} onToast={setToast} />
+      )}
+
+      {menuOpen && (
+        <div className="planner settings-page" role="dialog" aria-modal="true" aria-label="Settings">
+          <header className="planner__head">
+            <h2 className="planner__title">Settings</h2>
+            <button type="button" className="btn btn--ghost btn--small" onClick={() => setMenuOpen(false)}>Done</button>
+          </header>
+          <div className="planner__body">
+            <section className="dsettings" aria-label="Settings">
+            <div className="sheet__group">
+              <p className="sheet__title">About you</p>
+              <p className="hint">{myGender ? `${myGender === "woman" ? "Woman" : "Man"}` : "Not set"}{birthdayOf(me.id) ? ` · birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}</p>
+              <button className="btn btn--ghost" onClick={() => setAboutOpen(true)}>Edit</button>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Your photo</p>
+              <div className="row">
+                <button className="btn btn--ghost" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
+                  {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change photo" : "Add a photo"}
+                </button>
+                {myAvatar && <button className="btn btn--ghost" onClick={removeAvatar}>Remove</button>}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Theme</p>
+              <div className="chips chips--left">
+                {THEME_OPTIONS.map((t) => (
+                  <button key={t.value} className={t.value === info.space.theme ? "chip chip--on" : "chip"} onClick={() => saveSettings({ theme: t.value }, `${t.label} theme on`)}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Chat background</p>
+              <div className="row">
+                <button className="btn btn--ghost" onClick={() => backgroundInput.current?.click()} disabled={busySetting === "background"}>
+                  {busySetting === "background" ? "Uploading…" : info.space.backgroundMediaId ? "Change background" : "Choose a photo"}
+                </button>
+                {info.space.backgroundMediaId && <button className="btn btn--ghost" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Disappearing messages</p>
+              <div className="chips chips--left">
+                {DISAPPEAR_OPTIONS.map((o) => (
+                  <button key={o.label} className={o.value === disappear.value ? "chip chip--on" : "chip"}
+                    onClick={() => saveSettings({ disappearSeconds: o.value }, o.value === null ? "Messages stay" : "New messages will disappear")}>{o.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Storage</p>
+              {usage ? (
+                <>
+                  <div className="meter" role="img" aria-label={`${usedPct}% of storage used`}><span style={{ width: `${usedPct}%` }} /></div>
+                  <p className="hint">{formatBytes(usage.totalBytes)} of {formatBytes(usage.limitBytes)} used, {formatBytes(usage.keptBytes)} kept. Uploads this month: {usage.uploadsThisMonth} of {usage.uploadLimit.toLocaleString()}.</p>
+                </>
+              ) : <p className="hint">Checking…</p>}
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">App lock on this phone</p>
+              <p className="hint">{lockKind ? `Opens with your ${LOCK_LABEL[lockKind].toLowerCase()}.` : "Off. You type the shared password each time."}</p>
+              <div className="row">
+                <button className="btn btn--ghost" onClick={() => { setDrawerOpen(false); setLockSetupOpen(true); }}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
+                {lockKind && <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
+              </div>
+            </div>
+            <div className="sheet__group">
+              <p className="sheet__title">Notifications on this phone</p>
+              {notif === "on" ? <p className="hint">On. {partnerName} will see if you turn them off.</p>
+                : <button className="btn btn--ghost" onClick={turnOnNotifications}>Turn on notifications</button>}
+            </div>
+            {me.role === "host" && (
+              <>
+                <div className="sheet__group">
+                  <p className="sheet__title">Invite link</p>
+                  {invite ? <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />
+                    : <button className="btn btn--ghost" onClick={makeInvite}>{partner ? `Make a link for ${partner.name}'s new phone` : "Make an invite link"}</button>}
+                </div>
+                <div className="sheet__group">
+                  <p className="sheet__title">Another space</p>
+                  <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
+                </div>
+                <div className="sheet__group">
+                  <p className="sheet__title">Host password</p>
+                  <HostPasswordForm onToast={setToast} />
+                </div>
+              </>
+            )}
+          </section>
+          </div>
+        </div>
       )}
 
       {liveOpen && (

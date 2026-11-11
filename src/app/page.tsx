@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BondMark from "@/components/BondMark";
 import LockInput from "@/components/LockInput";
 import LockSetup from "@/components/LockSetup";
+import SignIn from "@/components/SignIn";
 import { api, ApiError } from "@/lib/api";
 import { getLock, LockReset, lockSkipped, skipLock, unlockWithLock } from "@/lib/applock";
 import { APP_NAME } from "@/lib/brand";
@@ -25,6 +25,7 @@ export default function UnlockPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offerLock, setOfferLock] = useState<Vault | null>(null);
+  const [another, setAnother] = useState(false);
 
   function choose(s: SavedSpace | null) {
     setCurrent(s);
@@ -110,15 +111,9 @@ export default function UnlockPage() {
     );
   }
 
-  if (!current) {
-    return (
-      <main className="gate">
-        <BondMark size={64} />
-        <h1 className="gate__title">{APP_NAME}</h1>
-        <p className="gate__lead">This is a private space for two. Open the invite link you were sent to get in.</p>
-        <Link className="quiet-link" href="/setup">Set up a new space</Link>
-      </main>
-    );
+  // A phone that doesn't know a space yet (or "Sign in another way"): host, partner, or start a new space.
+  if (!current || another) {
+    return <SignIn attempt={(keys, sp) => finish(keys, sp, true)} onBack={current ? () => setAnother(false) : undefined} />;
   }
 
   const lock = getLock(current.spaceId);
@@ -165,6 +160,7 @@ export default function UnlockPage() {
           )}
         </>
       )}
+      <button type="button" className="quiet-link link-btn--quiet" onClick={() => { setAnother(true); setError(null); }}>Sign in another way</button>
     </main>
   );
 }

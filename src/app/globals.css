@@ -1447,3 +1447,6 @@ html.lite .shell--together::before, html.lite .chead--live .heartline__path, htm
 html.lite .shell--together .chead .sring::after { animation: none; opacity: 0.6; }
 html.lite .glass { backdrop-filter: none; -webkit-backdrop-filter: none; background: color-mix(in srgb, var(--plum) 94%, var(--ink)); }
 html.lite .shell[data-theme="blush"] .glass { background: rgba(255, 255, 255, 0.96); }
+
+/* ---------- long chats: only the latest are drawn ---------- */
+.earlier { display: block; margin: 4px auto 12px; padding: 7px 16px; border-radius: 999px; color: var(--candle); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }

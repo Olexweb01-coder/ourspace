@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import AboutYou from "@/components/AboutYou";
 import CallScreen from "@/components/call/CallScreen";
@@ -105,6 +105,9 @@ const LiveGame = dynamic(() => import("@/components/live/LiveGame"), { ssr: fals
 // Checks run on a 2.4 s beat: every beat while she's here, every other beat (4.8 s) while she's away.
 // Stays under the server's 6 s "looking at the app" window, so you never get buzzed while it's open.
 const POLL_HALF_MS = 2400;
+// Only the latest messages are drawn (like WhatsApp), so the chat stays quick however long you've talked.
+// "Show earlier messages" draws more; jumping to a reply draws back to it.
+const DRAW_STEP = 80;
 const LOCK_AFTER_MS = 2 * 60 * 1000;
 const DISAPPEAR_OPTIONS: { value: number | null; label: string }[] = [
   { value: null, label: "Off" },
@@ -662,6 +665,31 @@ export default function ChatPage() {
       .filter((m) => (!m.deleted || (m.viewOnce && !!m.viewedAt) || m.deletedReason === "removed") && !(m.expiresAt && !m.deleted && new Date(m.expiresAt).getTime() < now))
       .sort((a, b) => Number(a.id) - Number(b.id));
   }, [msgs]);
+
+  const [drawCount, setDrawCount] = useState(DRAW_STEP);
+  const ordered = useMemo(() => [...visible].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()), [visible]);
+  const drawn = useMemo(() => (ordered.length > drawCount ? ordered.slice(-drawCount) : ordered), [ordered, drawCount]);
+  const hiddenCount = ordered.length - drawn.length;
+  const drawnFrom = hiddenCount > 0 && drawn.length ? new Date(drawn[0].createdAt).getTime() : null;
+  const keepPlace = useRef<{ id: string; top: number } | null>(null);   // the bubble to hold still while earlier ones appear above
+  const jumpAfterDraw = useRef<string | null>(null);
+
+  function showEarlier() {
+    const first = drawn[0] ? document.getElementById(`msg-${drawn[0].id}`) : null;
+    keepPlace.current = first && drawn[0] ? { id: drawn[0].id, top: first.getBoundingClientRect().top } : null;
+    setDrawCount((c) => c + DRAW_STEP);
+  }
+  // Earlier messages appeared above: keep what you were reading exactly where it was (no jump).
+  useLayoutEffect(() => {
+    const k = keepPlace.current;
+    keepPlace.current = null;
+    const list = listRef.current;
+    const el = k ? document.getElementById(`msg-${k.id}`) : null;
+    if (k && list && el) list.scrollTop += el.getBoundingClientRect().top - k.top;
+    const j = jumpAfterDraw.current;
+    if (j && document.getElementById(`msg-${j}`)) { jumpAfterDraw.current = null; jumpTo(j); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawCount]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -1479,7 +1507,14 @@ export default function ChatPage() {
 
   function jumpTo(id: string) {
     const el = document.getElementById(`msg-${id}`);
-    if (!el) return setToast("That message is too far back to jump to.");
+    if (!el) {
+      // Not drawn yet: draw back far enough to include it, then jump.
+      const at = ordered.findIndex((m) => m.id === id);
+      if (at < 0) return setToast("That message is too far back to jump to.");
+      jumpAfterDraw.current = id;
+      setDrawCount(Math.max(drawCount, ordered.length - at + 10));
+      return;
+    }
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     setFlash(id);
     setTimeout(() => setFlash((f) => (f === id ? null : f)), 1600);
@@ -1755,7 +1790,12 @@ export default function ChatPage() {
             </div>
           )}
 
-          {[...visible.map((m) => ({ at: m.createdAt, m, c: null as CallRow | null })), ...callsShown.map((c) => ({ at: c.createdAt, m: null as Msg | null, c }))]
+          {hiddenCount > 0 && (
+            <button type="button" className="earlier glass" onClick={showEarlier}>Show earlier messages</button>
+          )}
+
+          {[...drawn.map((m) => ({ at: m.createdAt, m, c: null as CallRow | null })),
+            ...callsShown.filter((c) => drawnFrom === null || new Date(c.createdAt).getTime() >= drawnFrom).map((c) => ({ at: c.createdAt, m: null as Msg | null, c }))]
             .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
             .map(({ m: maybe, c }) => {
             if (c) {

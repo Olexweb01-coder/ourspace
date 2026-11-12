@@ -26,6 +26,7 @@ import HostPasswordForm from "@/components/HostPasswordForm";
 import LockSetup from "@/components/LockSetup";
 import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
+import { useUpdateReady, useWhatsNew, WhatsNew } from "@/components/UpdateNotice";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
@@ -198,6 +199,8 @@ export default function ChatPage() {
   const [canSwitch, setCanSwitch] = useState(false);
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
+  const updateReady = useUpdateReady();
+  const [whatsNew, closeWhatsNew] = useWhatsNew();
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1339,6 +1342,7 @@ export default function ChatPage() {
   // Small glass notices under the header, instead of big banners.
   type Notice = { key: string; text: string; tone?: "gold" | "care" | "warm" | "warn"; onClick?: () => void };
   const notices: Notice[] = [];
+  if (updateReady) notices.push({ key: "upd", text: "A new version is ready. Tap to update", tone: "gold", onClick: () => window.location.reload() });
   if (partnerMood && partner) notices.push({ key: "pm", text: `${partner.name} feels ${partnerMood.label.toLowerCase()}. ${partnerMood.hint(partner.name)}`, tone: "warm" });
   if (partner && !myMood) notices.push({ key: "mm", text: "How are you feeling today?", tone: "gold", onClick: () => openOnly("mood") });
   if (streakAtRisk) notices.push({ key: "sr", text: iSentToday ? `Waiting on ${partnerName}. ${st.current}-day streak ends at midnight.` : `Your ${st.current}-day streak ends at midnight.`, tone: "warn", onClick: () => openOnly("streak") });
@@ -1889,6 +1893,7 @@ export default function ChatPage() {
           partnerAvatar={partner ? avatars[partner.id] ?? null : null}
           onClose={({ reason }) => { setActiveCall(null); if (reason === "no-media") setToast("Allow the microphone for Our Space in your browser settings, then call again."); void syncNow(); }} />
       )}
+      {whatsNew && !updateReady && <WhatsNew entry={whatsNew} onClose={closeWhatsNew} />}
       {arrived && partner && <div className="arrival" role="status">{partner.name} is here <span aria-hidden="true">♥</span></div>}
       {photoOpen && partner && avatars[partner.id] && (
         <MediaViewer kind="photo" url={avatars[partner.id]} caption={partner.name} onClose={() => setPhotoOpen(false)} />

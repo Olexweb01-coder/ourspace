@@ -1345,3 +1345,9 @@ button.notice { cursor: pointer; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .vthumb__meta { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(12, 5, 9, 0.6); color: #fff; font-size: 0.75rem; }
 @media (prefers-reduced-motion: reduce) { .vthumb__spin { animation: none; } }
+
+/* ---------- what's new ---------- */
+.whatsnew { padding: 22px 20px calc(env(safe-area-inset-bottom) + 18px); }
+.whatsnew__kicker { margin: 0; color: var(--candle); font-weight: 600; font-size: 0.85rem; }
+.whatsnew__title { margin: 4px 0 12px; font-family: var(--font-display), Georgia, serif; font-style: italic; font-weight: 500; font-size: 1.45rem; line-height: 1.2; }
+.whatsnew__list { margin: 0 0 16px; padding-left: 1.1em; display: flex; flex-direction: column; gap: 8px; color: var(--blush); font-size: 0.95rem; max-height: 50vh; overflow-y: auto; }

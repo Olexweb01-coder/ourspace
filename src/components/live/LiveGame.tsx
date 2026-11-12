@@ -8,6 +8,7 @@ import { audio, loadPrefs, savePrefs, stopAll, TRACKS, type AudioPrefs, type Sfx
 import { DEFAULT_LUDO, legalMoves, type LudoRules, type LudoState } from "@/lib/live/ludo";
 import { webglAvailable } from "@/lib/live/stage";
 import { canPlay as whotCanPlay, DEFAULT_WHOT, type Card, type WhotRules } from "@/lib/live/whot";
+import type { EventInfo } from "@/lib/events";
 import type { Vault } from "@/lib/vault";
 import Dice3D from "./Dice3D";
 import Ludo3D from "./Ludo3D";
@@ -22,14 +23,17 @@ type View = {
   id: string; kind: Kind; status: "lobby" | "playing" | "done"; version: number; createdBy: string; people: Person[];
   state: LudoState | WhotView | null; settings: LudoRules | WhotRules; bets: Record<string, Sealed>; ready: string[];
 };
-type Props = { vault: Vault; kind: Kind; gameId?: string; meId: string; partnerPronoun?: string; onClose: () => void; onToast: (m: string) => void };
+type Props = {
+  vault: Vault; kind: Kind; gameId?: string; meId: string; partnerPronoun?: string; onClose: () => void; onToast: (m: string) => void;
+  onEvent?: (ev: EventInfo) => void;   // posts a card in the chat: an invite when the table opens, the result when you win
+};
 
 const NAME: Record<Kind, string> = { ludo: "Ludo", whot: "Whot" };
 const POLL_MS = 1000;
 const whotCheck = (w: WhotView, c: Card) => whotCanPlay({ ...w, hands: {}, deck: [], moves: 0 } as never, c);
 
 // A live table: rules and bets first, then the game. Nothing moves unless you're both here.
-export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "They", onClose, onToast }: Props) {
+export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "They", onClose, onToast, onEvent }: Props) {
   const [id, setId] = useState<string | null>(gameId ?? null);
   const [view, setView] = useState<View | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,8 +52,8 @@ export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "
 
   useEffect(() => {
     if (id) return;
-    api<{ id: string }>("/api/live", { body: { kind } })
-      .then((r) => setId(r.id))
+    api<{ id: string; created?: boolean }>("/api/live", { body: { kind } })
+      .then((r) => { setId(r.id); if (r.created) onEvent?.({ type: "live-invite", kind, id: r.id }); })
       .catch((err) => { onToast(err instanceof ApiError ? err.message : "Couldn't open the table."); onClose(); });
   }, [id, kind, onClose, onToast]);
 
@@ -202,6 +206,14 @@ export default function LiveGame({ vault, kind, gameId, meId, partnerPronoun = "
   const theirBet = partner ? bets[partner.id] : undefined;
   const ludoState = view?.kind === "ludo" && s ? (s as LudoState) : null;
   const obj = partnerPronoun === "She" ? "her" : partnerPronoun === "He" ? "him" : "them";
+
+  // You won: one card in the chat saying so, and what's owed. Only the winner's phone posts it; its fixed id stops repeats.
+  const resultSent = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !winner || winner !== meId || resultSent.current === id) return;
+    resultSent.current = id;
+    onEvent?.({ type: "live-result", kind, id, winner: meId, ...(myBet ? { bet: myBet } : {}) });
+  }, [id, winner, meId, myBet, kind, onEvent]);
 
   return (
     <div className={`live live--${kind}`} role="dialog" aria-modal="true" aria-label={`${NAME[kind]}, live`} onPointerDown={firstTap}>

@@ -1412,3 +1412,15 @@ button.notice { cursor: pointer; }
 .chead__menu { position: relative; }
 .count-badge--corner { position: absolute; top: 0; right: -2px; min-width: 18px; height: 18px; font-size: 0.66rem; padding: 0 5px; }
 .dsec__title .count-badge { margin-left: 8px; vertical-align: 1px; }
+
+/* ---------- cards in the chat: game invites, results, quizzes, Truth or Dare ---------- */
+.evcard { display: flex; gap: 12px; align-items: flex-start; width: min(280px, 70vw); padding: 12px; margin: 2px 0; border: 0; border-radius: 16px; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: rgba(0, 0, 0, 0.18); box-shadow: inset 0 0 0 1px rgba(246, 201, 127, 0.28); }
+.evcard:active { transform: scale(0.98); }
+.evcard__icon { font-size: 1.6rem; line-height: 1; flex-shrink: 0; }
+.evcard__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.evcard__text strong { font-weight: 650; line-height: 1.25; }
+.evcard__text span { font-size: 0.86rem; opacity: 0.85; overflow-wrap: anywhere; }
+.evcard__text em { font-style: normal; font-size: 0.82rem; font-weight: 600; color: var(--candle); margin-top: 3px; }
+.evcard--live-result { box-shadow: inset 0 0 0 1px rgba(246, 201, 127, 0.5); }
+.shell[data-theme="blush"] .evcard { background: rgba(255, 255, 255, 0.55); box-shadow: inset 0 0 0 1px rgba(168, 102, 28, 0.35); }

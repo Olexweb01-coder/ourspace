@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
   const existing = await current(me.spaceId);
   if (existing) {
-    if (existing.kind === kind) return json({ id: existing.id });
+    if (existing.kind === kind) return json({ id: existing.id, created: false });
     return fail(`Finish or end your ${LIVE_NAME[existing.kind as LiveKind]} game first.`, 409);
   }
   const id = randomUUID();
@@ -44,5 +44,5 @@ export async function POST(req: Request) {
   await sql`insert into live_games (id, space_id, kind, created_by) values (${id}, ${me.spaceId}, ${kind}, ${me.memberId})`;
   await sql`insert into live_presence (game_id, member_id) values (${id}, ${me.memberId})`;
   after(() => pushTo(partnerId, { title: `🎲 ${me.name} wants to play ${LIVE_NAME[kind]} now`, body: "Join while they're here.", tag: "live", open: `live:${kind}:${id}` }));
-  return json({ id });
+  return json({ id, created: true });
 }

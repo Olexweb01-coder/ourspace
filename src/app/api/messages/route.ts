@@ -24,7 +24,7 @@ export async function POST(req: Request) {
   const me = await getMe();
   if (!me) return fail("Locked", 401);
 
-  const body = await readJson<{ iv?: string; ct?: string; viewOnce?: boolean; kind?: string; mediaId?: string; clientId?: string }>(req);
+  const body = await readJson<{ iv?: string; ct?: string; viewOnce?: boolean; kind?: string; mediaId?: string; clientId?: string; quiet?: boolean }>(req);
   const iv = body?.iv;
   const ct = body?.ct;
   if (typeof iv !== "string" || iv.length > 32 || !B64_RE.test(iv)) return fail("Invalid message");
@@ -74,6 +74,10 @@ export async function POST(req: Request) {
   }
 
   const partnerId = await getPartnerId(me);
+  // A card the app posts for an event (a game invite, who won): the event sent its own notification,
+  // and the app sent it, not you, so it doesn't buzz again and doesn't count toward the streak.
+  const quiet = body?.quiet === true && kind === "text";
+  if (quiet) return json({ id: msg.id, createdAt: msg.created_at, expiresAt: msg.expires_at, mediaExpiresAt, streak: null });
 
   // Streaks: the first thing each of you sends on a day counts. When the second person sends, the day is complete.
   const firstToday = await sql`

@@ -47,6 +47,8 @@ import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from
 import { enableNotifications, clearSpaceNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, savedSpaces, type Vault } from "@/lib/vault";
 import { isOpenTarget, sectionOfTag, type OpenTarget, type Section } from "@/lib/notify-open";
+import { eventText, stableId, validEvent, type EventInfo } from "@/lib/events";
+import EventCard from "@/components/chat/EventCard";
 
 type Reaction = string;   // "love", "angry", or any single emoji
 type Member = {
@@ -90,7 +92,7 @@ type SyncResponse = {
   messages: Msg[];
 };
 type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "cycles" | "statuses" | "calls">;
-type TextPayload = { t: "text"; body: string };
+type TextPayload = { t: "text"; body: string; ev?: EventInfo };   // ev: drawn as a card (a game invite, who won…)
 type Payload = (TextPayload | MediaPayload) & { reply?: ReplyRef };
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
 type OnceView = { kind: "text"; text: string } | { kind: "photo" | "video" | "voice"; url: string; mediaId: string; caption?: string };
@@ -647,7 +649,7 @@ export default function ChatPage() {
   }
 
   // ---------- sending instantly: on screen now, delivered in the background, never twice ----------
-  type Outgoing = { tmp: string; clientId: string; iv: string; ct: string; kind: string; viewOnce: boolean; createdAt: string };
+  type Outgoing = { tmp: string; clientId: string; iv: string; ct: string; kind: string; viewOnce: boolean; createdAt: string; quiet?: boolean };
   const [unsent, setUnsent] = useState<Set<string>>(new Set());   // couldn't be delivered (yet)
   const delivering = useRef(new Set<string>());
   const outboxKey = (spaceId: string) => `ourspace:outbox:${spaceId}`;
@@ -681,7 +683,7 @@ export default function ChatPage() {
         if (wait) await new Promise((r) => setTimeout(r, wait));
         try {
           const res = await api<{ id: string; createdAt: string; expiresAt: string | null }>("/api/messages", {
-            body: { iv: o.iv, ct: o.ct, viewOnce: o.viewOnce, kind: o.kind, clientId: o.clientId },
+            body: { iv: o.iv, ct: o.ct, viewOnce: o.viewOnce, kind: o.kind, clientId: o.clientId, ...(o.quiet ? { quiet: true } : {}) },
           });
           writeOutbox(v.spaceId, readOutbox(v.spaceId).filter((x) => x.tmp !== o.tmp));
           delivered(o.tmp, res);
@@ -945,6 +947,39 @@ export default function ChatPage() {
       e.preventDefault();
       void send();
     }
+  }
+
+  /** Posts a card in the chat. Cards about games are quiet (the game already notified) and can never be posted twice. */
+  async function sendEvent(ev: EventInfo): Promise<boolean> {
+    const v = vaultRef.current;
+    if (!v || !info) return false;
+    const meName = info.me.name;
+    const other = info.members.find((x) => x.id !== info.me.id)?.name ?? info.space.label;
+    const iWon = ev.type === "live-result" && ev.winner === info.me.id;
+    const payload: Payload = { t: "text", body: eventText(ev, meName, iWon ? meName : other, iWon ? other : meName), ev };
+    try {
+      const clientId = ev.type === "card" ? crypto.randomUUID() : await stableId(`${ev.type}:${ev.id}`);
+      const tmp = `tmp-${clientId}`;
+      if (payloads.current.has(tmp)) return true;   // already on its way
+      const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
+      const o: Outgoing = { tmp, clientId, iv, ct, kind: "text", viewOnce: false, createdAt: new Date().toISOString(), quiet: ev.type !== "card" };
+      payloads.current.set(tmp, payload);
+      payloadIv.current.set(tmp, iv);
+      addLocal(v, tmp, "text", { createdAt: o.createdAt, expiresAt: null }, iv, ct, false);
+      writeOutbox(v.spaceId, [...readOutbox(v.spaceId), o]);
+      void deliver(o);
+      return true;
+    } catch {
+      setToast("Couldn't post that to the chat.");
+      return false;
+    }
+  }
+
+  function openEvent(ev: EventInfo) {
+    if (ev.type === "live-invite") { goTo(`live:${ev.kind}:${ev.id}`); return; }
+    if (ev.type === "live-result") { goTo(ev.bet ? "debts" : "games"); return; }
+    if (ev.type === "quiz") { setGamesFocus(null); setGamesGame(ev.id); openOnly("games"); return; }
+    openOnly("games");
   }
 
   async function sendCard(text: string): Promise<boolean> {
@@ -1314,7 +1349,7 @@ export default function ChatPage() {
 
   const canEdit = (m: Msg) =>
     !!me && m.senderId === me.id && m.kind === "text" && !m.viewOnce && !m.deleted &&
-    payloads.current.get(m.id)?.t === "text" && Date.now() - new Date(m.createdAt).getTime() < EDIT_MS;
+    payloads.current.get(m.id)?.t === "text" && !(payloads.current.get(m.id) as TextPayload).ev && Date.now() - new Date(m.createdAt).getTime() < EDIT_MS;
 
   function startEdit(m: Msg) {
     const p = payloads.current.get(m.id);
@@ -1750,7 +1785,10 @@ export default function ChatPage() {
                     <span className="b__text">
                       {payload === undefined ? <span className="muted">Unlocking…</span>
                         : payload === null ? <span className="muted">Couldn&apos;t unlock this message</span>
-                        : payload.t === "text" ? payload.body : null}
+                        : payload.t === "text" ? (payload.ev && validEvent(payload.ev)
+                          ? <EventCard ev={payload.ev} mine={mine} meId={me.id} senderName={info.members.find((x) => x.id === m.senderId)?.name ?? partnerName}
+                              otherName={partnerName} onOpen={() => openEvent(payload.ev!)} />
+                          : payload.body) : null}
                     </span>
                   )}
                   {upPct[m.id] !== undefined && (
@@ -1893,7 +1931,7 @@ export default function ChatPage() {
       )}
       {gamesOpen && (
         <Games vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
-          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()} focus={gamesFocus} openGame={gamesGame}
+          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()} focus={gamesFocus} openGame={gamesGame} onEvent={sendEvent}
           partnerLabel={partnerName}
           onLive={(kind) => { setGamesOpen(false); setLiveOpen({ kind, id: live && live.kind === kind ? live.id : undefined }); }} />
       )}
@@ -1990,7 +2028,7 @@ export default function ChatPage() {
       )}
 
       {liveOpen && (
-        <LiveGame vault={vault} kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} />
+        <LiveGame vault={vault} kind={liveOpen.kind} gameId={liveOpen.id} meId={me.id} partnerPronoun={p.sub.charAt(0).toUpperCase() + p.sub.slice(1)} onClose={() => { setLiveOpen(null); void syncNow(); }} onToast={setToast} onEvent={(ev) => void sendEvent(ev)} />
       )}
       {notifPrompt && notif !== "on" && (
         <NotifPrompt partnerName={partnerName} partnerPossessive={p.pos} needsHomeScreen={isIOS() && !isStandalone()}

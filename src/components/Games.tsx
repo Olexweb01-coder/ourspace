@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import type { EventInfo } from "@/lib/events";
 import { decryptJSON, encryptJSON } from "@/lib/crypto-client";
 import { LOVE } from "@/lib/emoji";
 import {
@@ -25,6 +26,7 @@ type Props = {
   onLive: (kind: "ludo" | "whot") => void;
   partnerLabel: string;   // what you call them; used before they've joined
   focus?: "debts" | null;  // opened from a notification or a card about a debt
+  onEvent?: (ev: EventInfo) => Promise<boolean>;   // posts a card in the chat (a new quiz, a Truth or Dare)
   openGame?: string | null; // opened from a card about one quiz
 };
 
@@ -53,7 +55,7 @@ function savePlayed(spaceId: string, ids: Iterable<string>) {
 }
 const answerAad = (spaceId: string, id: string, memberId: string) => `answer:${spaceId}:${id}:${memberId}`;
 
-export default function Games({ vault, me, partner: joined, partnerLabel, onClose, onToast, onSendText, onChanged, onLive, focus = null, openGame = null }: Props) {
+export default function Games({ vault, me, partner: joined, partnerLabel, onClose, onToast, onSendText, onChanged, onLive, focus = null, openGame = null, onEvent }: Props) {
   // Before they join, speak of them by name anyway; buttons that need them stay off (see `joined`).
   const partner = joined ?? null;
   const theirName = joined?.name ?? partnerLabel;
@@ -115,6 +117,7 @@ export default function Games({ vault, me, partner: joined, partnerLabel, onClos
       const id = crypto.randomUUID();
       const { iv, ct } = await encryptJSON(vault.encKey, { questions }, setupAad(vault.spaceId, id));
       await api("/api/games", { body: { action: "start", id, kind, iv, ct } });
+      void onEvent?.({ type: "quiz", kind, id });
       await load();
       onChanged();
       setView({ screen: "play", id });
@@ -181,7 +184,7 @@ export default function Games({ vault, me, partner: joined, partnerLabel, onClos
           : view.screen === "home" ? <Home games={games} me={me} partner={partner} theirName={theirName} busy={busy} start={start} onLive={onLive} debts={debts} settle={settle} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
           : view.screen === "play" && find(view.id) ? <Play key={view.id} game={find(view.id)!} me={me} partner={partner} busy={busy} submit={submit} nameOf={nameOf} />
           : view.screen === "results" && find(view.id) ? <Results game={find(view.id)!} me={me} partner={partner} nameOf={nameOf} remove={remove} />
-          : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onToast={onToast} />
+          : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onEvent={onEvent} onToast={onToast} />
           : <p className="hint">That game is gone.</p>}
       </div>
     </div>
@@ -387,8 +390,9 @@ function Results({ game, me, partner, nameOf, remove }: {
   );
 }
 
-function Deck({ deck, spaceId, partner, onSendText, onToast }: {
+function Deck({ deck, spaceId, partner, onSendText, onEvent, onToast }: {
   deck: DeckKind; spaceId: string; partner: Person | null; onSendText: (t: string) => Promise<boolean>; onToast: (m: string) => void;
+  onEvent?: (ev: EventInfo) => Promise<boolean>;
 }) {
   const d = DECKS[deck];
   const key = `ourspace:cards:${spaceId}:${deck}`;
@@ -413,7 +417,7 @@ function Deck({ deck, spaceId, partner, onSendText, onToast }: {
   async function send() {
     if (!partner) return onToast("Invite your partner first.");
     setSending(true);
-    const ok = await onSendText(`${d.prefix}: ${d.cards[card]}`);
+    const ok = onEvent ? await onEvent({ type: "card", deck, text: d.cards[card] }) : await onSendText(`${d.prefix}: ${d.cards[card]}`);
     setSending(false);
     if (ok) { onToast(`Sent to ${partner.name}`); setCard(drawCard(deck, seen)); }
   }

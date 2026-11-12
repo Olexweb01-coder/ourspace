@@ -28,6 +28,7 @@ import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
 import { useUpdateReady, useWhatsNew, WhatsNew } from "@/components/UpdateNotice";
 import { SBlock, SGroup, SRow } from "@/components/settings/Rows";
+import DisguiseSettings from "@/components/settings/DisguiseSettings";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
@@ -1997,6 +1998,10 @@ export default function ChatPage() {
                   {lockKind && <button className="btn btn--ghost btn--small" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
                 </SRow>
                 <SRow label="Lock now" hint="Locks this phone straight away" onClick={lockNow} />
+              </SGroup>
+
+              <SGroup title="Disguise" foot="Your partner's phone isn't affected. The app lock still protects everything.">
+                <DisguiseSettings memberId={me.id} onApply={() => personalizeInstall(vault.spaceId, vault.memberId)} onToast={setToast} />
               </SGroup>
 
               <SGroup title="Storage" foot="Files disappear after 30 days unless one of you taps Keep.">

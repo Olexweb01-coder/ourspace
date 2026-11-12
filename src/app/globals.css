@@ -1424,3 +1424,15 @@ button.notice { cursor: pointer; }
 .evcard__text em { font-style: normal; font-size: 0.82rem; font-weight: 600; color: var(--candle); margin-top: 3px; }
 .evcard--live-result { box-shadow: inset 0 0 0 1px rgba(246, 201, 127, 0.5); }
 .shell[data-theme="blush"] .evcard { background: rgba(255, 255, 255, 0.55); box-shadow: inset 0 0 0 1px rgba(168, 102, 28, 0.35); }
+
+/* ---------- disguise ---------- */
+.disguise__name { width: 100%; gap: 8px; }
+.disguise__name .field { flex: 1; min-width: 0; }
+.disguise__icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; width: 100%; }
+.dicon { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px; border: 0; border-radius: 16px; background: none; color: var(--blush); font: inherit; font-size: 0.75rem; cursor: pointer; }
+.dicon img, .dicon__plus { width: 56px; height: 56px; border-radius: 14px; object-fit: cover; display: grid; place-items: center; }
+.dicon__plus { background: rgba(255, 255, 255, 0.08); font-size: 1.6rem; color: var(--muted); }
+.dicon--on { box-shadow: inset 0 0 0 2px var(--candle); background: rgba(246, 201, 127, 0.08); }
+.dicon:disabled { opacity: 0.6; }
+.disguise__how { margin: 0; }
+.shell[data-theme="blush"] .dicon__plus { background: rgba(59, 21, 38, 0.06); }

@@ -7,7 +7,7 @@ self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await Promise.all(keys.filter((k) => k !== CACHE && k !== "ourspace-disguise").map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -38,16 +38,22 @@ self.addEventListener("push", (event) => {
     // If the app is open, tell it to fetch the new message right away.
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     windows.forEach((c) => c.postMessage({ type: "push", tag: data.tag || null }));
-    await self.registration.showNotification(title, {
-      body: data.body || "",
+    // Disguised on this phone: notifications use the disguise name and icon, and never say what they're about.
+    let disguise = null;
+    try {
+      const hit = await (await caches.open("ourspace-disguise")).match("/__disguise");
+      if (hit) disguise = await hit.json();
+    } catch (e) { disguise = null; }
+    await self.registration.showNotification(disguise ? disguise.name : title, {
+      body: disguise ? "You have a new notification." : (data.body || ""),
       tag: (data.space ? data.space.slice(0, 8) + ":" : "") + (data.tag || "ourspace"),   // per space, so spaces never replace each other
       renotify: true,
       // A nudge is a call to come online: it stays on screen until tapped and buzzes like a heartbeat
       // (Android/desktop; iPhone shows it on the lock screen with its normal sound).
       requireInteraction: isNudge,
       vibrate: isNudge ? [120, 90, 120, 600, 120, 90, 120] : [80],
-      icon: "/icons/icon-192.png",
-      badge: "/icons/badge-96.png",
+      icon: disguise ? disguise.icon : "/icons/icon-192.png",
+      ...(disguise ? {} : { badge: "/icons/badge-96.png" }),
       data: { url: data.url || "/", space: data.space || null, open: data.open || null },
     });
     await updateBadge();

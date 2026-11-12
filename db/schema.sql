@@ -397,3 +397,11 @@ create index if not exists call_signals_call_idx on call_signals(call_id, id);
 -- ===== Send once (same as db/016_send_once.sql) =====
 alter table messages add column if not exists client_id uuid;
 create unique index if not exists messages_client_idx on messages(sender_id, client_id) where client_id is not null;
+
+-- ===== Disguise (same as db/017_app_icon.sql) =====
+create table if not exists app_icons (
+  member_id   uuid primary key references members(id) on delete cascade,
+  png192      text not null,
+  png512      text not null,
+  updated_at  timestamptz not null default now()
+);

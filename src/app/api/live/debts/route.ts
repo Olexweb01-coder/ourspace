@@ -24,13 +24,13 @@ export async function POST(req: Request) {
   if (b.action === "paid") {
     const rows = await sql`update love_debts set paid_at = now() where id = ${b.id} and space_id = ${me.spaceId} and owed_to = ${me.memberId} and paid_at is null returning owed_by`;
     if (!rows[0]) return fail("Only the one who won can mark it paid.", 403);
-    after(() => pushTo(rows[0].owed_by, { title: `❤️ ${me.name} says you paid up`, body: "Debt of love settled. Rematch?", tag: "debt" }));
+    after(() => pushTo(rows[0].owed_by, { title: `❤️ ${me.name} says you paid up`, body: "Debt of love settled. Rematch?", tag: "debt", open: "debts" }));
     return json({ ok: true });
   }
   if (b.action === "forgive") {
     const rows = await sql`delete from love_debts where id = ${b.id} and space_id = ${me.spaceId} and owed_to = ${me.memberId} and paid_at is null returning owed_by`;
     if (!rows[0]) return fail("Only the one who won can let it go.", 403);
-    after(() => pushTo(rows[0].owed_by, { title: `💗 ${me.name} let you off`, body: "One love debt forgiven.", tag: "debt" }));
+    after(() => pushTo(rows[0].owed_by, { title: `💗 ${me.name} let you off`, body: "One love debt forgiven.", tag: "debt", open: "debts" }));
     return json({ ok: true });
   }
   return fail("Unknown action");

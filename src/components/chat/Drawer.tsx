@@ -19,12 +19,14 @@ export default function Drawer({ open, onClose, children }: { open: boolean; onC
   );
 }
 
-export function DrawerItem({ icon, label, hint, badge, onClick }: { icon: ReactNode; label: string; hint?: string; badge?: boolean; onClick: () => void }) {
+export function DrawerItem({ icon, label, hint, badge, onClick }: { icon: ReactNode; label: string; hint?: string; badge?: boolean | number; onClick: () => void }) {
   return (
     <button type="button" className="ditem" onClick={onClick}>
       <span className="ditem__icon" aria-hidden="true">{icon}</span>
       <span className="ditem__text"><strong>{label}</strong>{hint && <span>{hint}</span>}</span>
-      {badge && <span className="dot-badge dot-badge--inline" aria-label="Needs you" />}
+      {typeof badge === "number"
+        ? badge > 0 && <span className="count-badge" aria-label={`${badge} waiting`}>{badge > 99 ? "99+" : badge}</span>
+        : badge && <span className="dot-badge dot-badge--inline" aria-label="Needs you" />}
     </button>
   );
 }

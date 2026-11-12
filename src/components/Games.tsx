@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { decryptJSON, encryptJSON } from "@/lib/crypto-client";
 import { LOVE } from "@/lib/emoji";
@@ -24,6 +24,8 @@ type Props = {
   onChanged: () => void;
   onLive: (kind: "ludo" | "whot") => void;
   partnerLabel: string;   // what you call them; used before they've joined
+  focus?: "debts" | null;  // opened from a notification or a card about a debt
+  openGame?: string | null; // opened from a card about one quiz
 };
 
 type Row = {
@@ -51,7 +53,7 @@ function savePlayed(spaceId: string, ids: Iterable<string>) {
 }
 const answerAad = (spaceId: string, id: string, memberId: string) => `answer:${spaceId}:${id}:${memberId}`;
 
-export default function Games({ vault, me, partner: joined, partnerLabel, onClose, onToast, onSendText, onChanged, onLive }: Props) {
+export default function Games({ vault, me, partner: joined, partnerLabel, onClose, onToast, onSendText, onChanged, onLive, focus = null, openGame = null }: Props) {
   // Before they join, speak of them by name anyway; buttons that need them stay off (see `joined`).
   const partner = joined ?? null;
   const theirName = joined?.name ?? partnerLabel;
@@ -70,6 +72,12 @@ export default function Games({ vault, me, partner: joined, partnerLabel, onClos
     } catch { /* not critical */ }
   }, [vault]);
   useEffect(() => { void loadDebts(); }, [loadDebts]);
+  // Opened from a debt notification or card: scroll to Love debts once they're there.
+  useEffect(() => {
+    if (focus !== "debts" || debts.length === 0) return;
+    const t = setTimeout(() => document.getElementById("love-debts")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+    return () => clearTimeout(t);
+  }, [focus, debts.length]);
 
   async function settle(d: Debt, action: "paid" | "forgive") {
     try { await api("/api/live/debts", { body: { action, id: d.id } }); await loadDebts(); onToast(action === "paid" ? "Paid with love" : "Let go, with love"); }
@@ -146,6 +154,15 @@ export default function Games({ vault, me, partner: joined, partnerLabel, onClos
   }
 
   const find = (id: string) => games?.find((g) => g.id === id) ?? null;
+  // Opened from a quiz card: go straight to that quiz (to answer it, or to see the results).
+  const openedGame = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openGame || !games || openedGame.current === openGame) return;
+    openedGame.current = openGame;
+    const g = games.find((x) => x.id === openGame);
+    if (!g) { onToast("That game has finished."); return; }
+    setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id });
+  }, [openGame, games, onToast]);
   const nameOf = (id: string | null) => (id === me.id ? me.name : theirName);
   const title = view.screen === "deck" ? DECKS[view.deck].title
     : view.screen === "home" ? "Play together"
@@ -224,7 +241,7 @@ function Home({ games, me, partner, theirName, busy, start, open, deck, nameOf, 
       </section>
 
       {debts.length > 0 && (
-        <section className="gsec">
+        <section className="gsec" id="love-debts">
           <p className="sheet__title">Love debts</p>
           {debts.slice(0, 12).map((d) => {
             const owedToMe = d.owedTo === me.id;

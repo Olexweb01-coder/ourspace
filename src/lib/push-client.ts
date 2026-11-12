@@ -68,15 +68,26 @@ export async function reportNotificationState(): Promise<"on" | "off" | "unknown
   return "on";
 }
 
-/** Opening a space clears its notifications from the phone (and older ones that don't say which space). */
-export async function clearSpaceNotifications(spaceId: string): Promise<void> {
+/**
+ * Opening a space clears its notifications from the phone (and older ones that don't say which space).
+ * Returns what each cleared one was about (its tag), so the app can keep a badge until you've seen it.
+ */
+export async function clearSpaceNotifications(spaceId: string): Promise<string[]> {
+  const tags: string[] = [];
   try {
-    if (!("serviceWorker" in navigator)) return;
+    if (!("serviceWorker" in navigator)) return tags;
     const reg = await navigator.serviceWorker.getRegistration();
     const list = (await reg?.getNotifications()) ?? [];
     for (const n of list) {
       const space = (n.data as { space?: string | null } | null)?.space;
-      if (!space || space === spaceId) n.close();
+      if (!space || space === spaceId) {
+        tags.push(n.tag.includes(":") ? n.tag.slice(n.tag.indexOf(":") + 1) : n.tag);
+        n.close();
+      }
     }
+    const left = list.length - tags.length;
+    const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    if (left > 0) await nav.setAppBadge?.(left); else await nav.clearAppBadge?.();
   } catch { /* not available on this browser */ }
+  return tags;
 }

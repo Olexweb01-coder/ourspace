@@ -15,14 +15,16 @@ type Props = {
   nudgeLabel: string;
   onCall?: ((kind: "voice" | "video") => void) | null;
   onPhoto?: () => void;
+  menuBadge?: number;         // things waiting in the side panel
 };
 
 // The heading: her name in gold-rose, a heartbeat line that pulses while she's here.
-export default function Header({ mark, name, sub, live, statusRing, streak, onMenu, onWho, onStreak, onNudge, nudgeLabel, onCall, onPhoto }: Props) {
+export default function Header({ mark, name, sub, live, statusRing, streak, onMenu, onWho, onStreak, onNudge, nudgeLabel, onCall, onPhoto, menuBadge = 0 }: Props) {
   return (
     <header className={live ? "chead glass chead--live" : "chead glass"}>
-      <button type="button" className="chead__menu icon-btn" onClick={onMenu} aria-label="Open menu">
+      <button type="button" className="chead__menu icon-btn" onClick={onMenu} aria-label={menuBadge > 0 ? `Open menu, ${menuBadge} waiting` : "Open menu"}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16v2H4zm0 4.5h16v2H4zm0 4.5h10v2H4z" /></svg>
+        {menuBadge > 0 && <span className="count-badge count-badge--corner" aria-hidden="true">{menuBadge > 99 ? "99+" : menuBadge}</span>}
       </button>
       <div className="chead__who">
         <button type="button" className={`sring sring--${statusRing} chead__photo`} onClick={onPhoto ?? onWho}

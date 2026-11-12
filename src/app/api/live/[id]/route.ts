@@ -127,6 +127,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         title: `🏆 ${w?.display_name ?? "They"} won ${LIVE_NAME[g.kind as LiveKind]}`,
         body: bet ? `You owe ${o} your bet. Pay up with love.` : "Rematch?",
         tag: "live",
+        open: "debts",
       }));
     }
   }

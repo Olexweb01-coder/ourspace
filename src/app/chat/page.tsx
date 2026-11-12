@@ -46,6 +46,7 @@ import { ageOn, countdownLabel, daysBetween, EMPTY_CYCLE, nextOccurrence, planne
 import { guessMoods, isMilestone, localDay, moodAad, moodOf, type MoodKey } from "@/lib/rituals";
 import { enableNotifications, clearSpaceNotifications, isIOS, isStandalone, pushSupported, reportNotificationState } from "@/lib/push-client";
 import { clearVault, getVault, savedSpaces, type Vault } from "@/lib/vault";
+import { isOpenTarget, sectionOfTag, type OpenTarget, type Section } from "@/lib/notify-open";
 
 type Reaction = string;   // "love", "angry", or any single emoji
 type Member = {
@@ -198,6 +199,27 @@ export default function ChatPage() {
   const [canSwitch, setCanSwitch] = useState(false);
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
+  // Red badges: what notifications were about, kept until you open that part of the app.
+  const [badges, setBadges] = useState<Partial<Record<Section, number>>>({});
+  const badgeKey = (spaceId: string) => `ourspace:badges:${spaceId}`;
+  function saveBadges(next: Partial<Record<Section, number>>) {
+    const v = vaultRef.current;
+    if (v) { try { localStorage.setItem(badgeKey(v.spaceId), JSON.stringify(next)); } catch { /* full */ } }
+    return next;
+  }
+  function addBadges(tags: string[]) {
+    const secs = tags.map(sectionOfTag).filter((x): x is Section => !!x && x !== openSection.current);
+    if (secs.length) setBadges((prev) => { const next = { ...prev }; for (const x of secs) next[x] = (next[x] ?? 0) + 1; return saveBadges(next); });
+  }
+  function clearBadge(sec: Section) {
+    setBadges((prev) => { if (!prev[sec]) return prev; const next = { ...prev }; delete next[sec]; return saveBadges(next); });
+  }
+  const openSection = useRef<Section | null>(null);
+  // Where a tapped notification (or card) should take you, once the chat is ready.
+  const pendingOpen = useRef<OpenTarget | null>(null);
+  const [openTick, setOpenTick] = useState(0);
+  const [gamesFocus, setGamesFocus] = useState<"debts" | null>(null);
+  const [gamesGame, setGamesGame] = useState<string | null>(null);
   const updateReady = useUpdateReady();
   const [whatsNew, closeWhatsNew] = useWhatsNew();
 
@@ -227,6 +249,12 @@ export default function ChatPage() {
       return;
     }
     vaultRef.current = v;
+    try { setBadges(JSON.parse(localStorage.getItem(`ourspace:badges:${v.spaceId}`) || "{}")); } catch { /* none yet */ }
+    try {
+      const want = new URLSearchParams(window.location.search).get("open") ?? sessionStorage.getItem("ourspace:open");
+      sessionStorage.removeItem("ourspace:open");
+      if (isOpenTarget(want)) { pendingOpen.current = want; setOpenTick((t) => t + 1); }
+    } catch { /* private mode */ }
     personalizeInstall(v.spaceId, v.memberId);
     setWelcome(new URLSearchParams(window.location.search).get("welcome") === "1");
     const clean = `/chat?s=${v.spaceId}&m=${v.memberId}`;
@@ -254,7 +282,7 @@ export default function ChatPage() {
       });
       void (async () => { await decryptList(waiting.map((o) => ({ id: o.tmp, senderId: v.memberId, kind: o.kind, viewOnce: o.viewOnce, viewedAt: null, deleted: false, reactions: {}, expiresAt: null, createdAt: o.createdAt, iv: o.iv, ct: o.ct, media: null }))); waiting.forEach((o) => void deliver(o)); })();
     }
-    void clearSpaceNotifications(v.spaceId);
+    void clearSpaceNotifications(v.spaceId).then(addBadges);
     void reportNotificationState().then(setNotif);
   }, [router]);
 
@@ -425,11 +453,22 @@ export default function ChatPage() {
       } else {
         if (hiddenAt.current && Date.now() - hiddenAt.current > LOCK_AFTER_MS) return lockOut();
         hiddenAt.current = null;
-        if (vaultRef.current) void clearSpaceNotifications(vaultRef.current.spaceId);   // back in the chat: its notifications go
+        if (vaultRef.current) void clearSpaceNotifications(vaultRef.current.spaceId).then(addBadges);   // back in the chat: its notifications go, their badges stay
         void syncNow();
       }
     };
-    const onSwMessage = (e: MessageEvent) => { if (e.data?.type === "push") void syncNow(); };
+    const onSwMessage = (e: MessageEvent) => {
+      const v = vaultRef.current;
+      if (e.data?.type === "push") {
+        void syncNow();
+        // Looking at the app: take it out of the tray now. Each notification is counted once, as it leaves the tray.
+        if (v && document.visibilityState === "visible") void clearSpaceNotifications(v.spaceId).then(addBadges);
+      } else if (e.data?.type === "open") {
+        // A notification was tapped while the app was open: go to what it's about.
+        if (isOpenTarget(e.data.open) && (!e.data.space || e.data.space === v?.spaceId)) { pendingOpen.current = e.data.open; setOpenTick((t) => t + 1); }
+        if (v) void clearSpaceNotifications(v.spaceId).then(addBadges);
+      }
+    };
 
     document.addEventListener("visibilitychange", onVisibility);
     navigator.serviceWorker?.addEventListener("message", onSwMessage);
@@ -439,6 +478,37 @@ export default function ChatPage() {
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
     };
   }, [ready, syncNow, lockOut]);
+
+  // ---------- opening what a notification or card is about ----------
+  useEffect(() => {
+    const t = pendingOpen.current;
+    if (!t || !info) return;
+    pendingOpen.current = null;
+    goTo(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTick, info]);
+
+  function goTo(t: OpenTarget) {
+    const closePages = () => { setMoodOpen(false); setPlannerOpen(false); setGamesOpen(false); setStreakOpen(false); setAboutOpen(false); setMenuOpen(false); };
+    if (t !== "games" && t !== "planner" && t !== "mood" && t !== "streak" && t !== "debts" && t !== "status") {
+      const [, kind, id] = t.split(":");   // live:<ludo|whot>:<id>
+      closePages(); setDrawerOpen(false);
+      setLiveOpen({ kind: kind as "ludo" | "whot", id });
+      return;
+    }
+    if (t === "debts") { setGamesGame(null); setGamesFocus("debts"); openOnly("games"); return; }
+    if (t === "status") { closePages(); setDrawerOpen(true); return; }   // her status is at the top of the side panel
+    openOnly(t);
+  }
+
+  // Opening a part of the app clears its badge.
+  openSection.current = gamesOpen || liveOpen ? "games" : plannerOpen ? "planner" : moodOpen ? "mood" : streakOpen ? "streak" : statusView === "theirs" ? "status" : null;
+  useEffect(() => { if (gamesOpen || liveOpen) clearBadge("games"); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [gamesOpen, liveOpen]);
+  useEffect(() => { if (plannerOpen) clearBadge("planner"); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [plannerOpen]);
+  useEffect(() => { if (moodOpen) clearBadge("mood"); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [moodOpen]);
+  useEffect(() => { if (streakOpen) clearBadge("streak"); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [streakOpen]);
+  useEffect(() => { if (statusView === "theirs") clearBadge("status"); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [statusView]);
+  useEffect(() => { if (!gamesOpen) { setGamesFocus(null); setGamesGame(null); } }, [gamesOpen]);
 
   // ---------- derived ----------
   const me = info?.me ?? null;
@@ -1414,6 +1484,16 @@ export default function ChatPage() {
   const typing = !!partner?.typing;
   const nameOf = (id: string) => (id === me.id ? "You" : info.members.find((m) => m.id === id)?.name ?? partnerName);
   const gamesWaiting = info.gamesWaiting?.length > 0 && info.gamesWaiting.some((g) => g.createdBy !== me.id);
+  const waitingCount = (info.gamesWaiting ?? []).filter((g) => g.createdBy !== me.id).length
+    + (info.live && info.live.status === "lobby" && info.live.createdBy !== me.id ? 1 : 0);
+  const badgeOf = {
+    games: Math.max(badges.games ?? 0, waitingCount),
+    planner: badges.planner ?? 0,
+    mood: badges.mood ?? 0,
+    streak: badges.streak ?? 0,
+    status: Math.max(badges.status ?? 0, theirStatuses.filter((x) => !x.seenAt).length),
+  };
+  const menuBadge = badgeOf.games + badgeOf.planner + badgeOf.mood + badgeOf.streak + badgeOf.status;
 
   const p = pron(partner?.gender ?? null);
   const birthdayOf = (id: string | undefined) => specials.find((d) => d.kind === "birthday" && d.aboutMember === id) ?? null;
@@ -1486,7 +1566,7 @@ export default function ChatPage() {
         </div>
 
         <div className="dsec">
-          <p className="dsec__title">Status</p>
+          <p className="dsec__title">Status{badgeOf.status > 0 && <span className="count-badge" aria-label={`${badgeOf.status} new`}>{badgeOf.status}</span>}</p>
           <div className="srow">
             <button type="button" className="sbubble" onClick={() => (myStatuses.length ? setStatusView("mine") : setStatusCompose(true))}>
               <span className={myStatuses.length ? "sbubble__ring sbubble__ring--seen" : "sbubble__ring"}>
@@ -1508,13 +1588,13 @@ export default function ChatPage() {
         </div>
 
         <div className="dsec">
-          <DrawerItem label="Feelings today" hint={myMood ? `You: ${moodOf(myMood)?.label}` : "Share how you feel"} onClick={() => openOnly("mood")}
+          <DrawerItem label="Feelings today" hint={myMood ? `You: ${moodOf(myMood)?.label}` : "Share how you feel"} badge={badgeOf.mood} onClick={() => openOnly("mood")}
             icon={<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18z" /></svg>} />
-          <DrawerItem label="Us, planned" hint={myGender === "man" ? "Special days, care, goals, talk" : "Special days, cycle, goals, talk"} onClick={() => openOnly("planner")}
+          <DrawerItem label="Us, planned" hint={myGender === "man" ? "Special days, care, goals, talk" : "Special days, cycle, goals, talk"} badge={badgeOf.planner} onClick={() => openOnly("planner")}
             icon={<svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>} />
-          <DrawerItem label="Play together" hint={gamesWaiting ? "A game is waiting for you" : "Games and cards"} badge={gamesWaiting} onClick={() => openOnly("games")}
+          <DrawerItem label="Play together" hint={badgeOf.games ? "Something is waiting for you" : "Games and cards"} badge={badgeOf.games} onClick={() => openOnly("games")}
             icon={<svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>} />
-          <DrawerItem label="Our streak" hint={`${st.current} now · longest ${st.best}`} onClick={() => openOnly("streak")}
+          <DrawerItem label="Our streak" hint={`${st.current} now · longest ${st.best}`} badge={badgeOf.streak} onClick={() => openOnly("streak")}
             icon={<svg viewBox="0 0 24 24"><path d="M12 20.5c-.4 0-.7-.1-1-.4C6.3 16 3 13.1 3 9.4 3 6.6 5.2 4.5 7.9 4.5c1.6 0 3.1.8 4.1 2.1 1-1.3 2.5-2.1 4.1-2.1 2.7 0 4.9 2.1 4.9 4.9 0 3.7-3.3 6.6-8 10.7-.3.3-.6.4-1 .4z" /></svg>} />
           <DrawerItem label="Settings" hint="Photo, theme, lock, storage and more" onClick={() => openOnly("settings")}
             icon={<svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)" /></svg>} />
@@ -1544,6 +1624,7 @@ export default function ChatPage() {
             onNudge={partner ? nudge : null}
             nudgeLabel={`Nudge ${partnerName}`}
             onCall={partner ? (k) => void startCall(k) : null}
+            menuBadge={drawerOpen ? 0 : menuBadge}
           />
           {notices.length > 0 && (
             <div className="notices" role="list">
@@ -1812,7 +1893,7 @@ export default function ChatPage() {
       )}
       {gamesOpen && (
         <Games vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
-          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()}
+          onClose={() => setGamesOpen(false)} onToast={setToast} onSendText={sendCard} onChanged={() => void syncNow()} focus={gamesFocus} openGame={gamesGame}
           partnerLabel={partnerName}
           onLive={(kind) => { setGamesOpen(false); setLiveOpen({ kind, id: live && live.kind === kind ? live.id : undefined }); }} />
       )}

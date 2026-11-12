@@ -43,6 +43,6 @@ export async function POST(req: Request) {
   const sql = db();
   await sql`insert into live_games (id, space_id, kind, created_by) values (${id}, ${me.spaceId}, ${kind}, ${me.memberId})`;
   await sql`insert into live_presence (game_id, member_id) values (${id}, ${me.memberId})`;
-  after(() => pushTo(partnerId, { title: `🎲 ${me.name} wants to play ${LIVE_NAME[kind]} now`, body: "Join while they're here.", tag: "live" }));
+  after(() => pushTo(partnerId, { title: `🎲 ${me.name} wants to play ${LIVE_NAME[kind]} now`, body: "Join while they're here.", tag: "live", open: `live:${kind}:${id}` }));
   return json({ id });
 }

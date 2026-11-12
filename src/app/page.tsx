@@ -47,6 +47,9 @@ export default function UnlockPage() {
     const valid = !!(s && m && UUID.test(s) && UUID.test(m));
     const known = valid ? list.find((x) => x.spaceId === s) : undefined;
     const fromNotification = params.get("from") === "n";
+    // What the notification was about: the chat opens it straight after you unlock.
+    const openWhat = params.get("open");
+    if (fromNotification && openWhat) { try { sessionStorage.setItem("ourspace:open", openWhat); } catch { /* private mode */ } }
     if (valid && (!known || known.memberId !== m) && (fromNotification || list.length === 0 || !known)) {
       rememberSpace({ spaceId: s!, memberId: m!, label: known?.label ?? "", myName: known?.myName ?? "" });
       list = savedSpaces();

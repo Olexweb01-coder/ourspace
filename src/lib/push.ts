@@ -1,6 +1,7 @@
 import webpush from "web-push";
 import { db } from "./db";
 import { ALWAYS_TAGS, categoryOf, IN_APP_QUIET_TAGS, IN_APP_SECONDS, QUIET_FROM, QUIET_TO } from "./notify-prefs";
+import { sectionOfTag, type OpenTarget } from "./notify-open";
 
 let configured: boolean | null = null;
 
@@ -19,7 +20,7 @@ function configure(): boolean {
   return true;
 }
 
-export type PushPayload = { title: string; body: string; tag?: string; url?: string };
+export type PushPayload = { title: string; body: string; tag?: string; url?: string; open?: OpenTarget };
 
 /**
  * Sends a notification to every device of a member.
@@ -31,7 +32,10 @@ export async function pushTo(memberId: string | null, payload: PushPayload): Pro
   const target = await wants(memberId, payload.tag);
   if (!target) return;
   // Which space it's from: tapping opens that space, and opening the space clears its notifications.
-  const full = { ...payload, space: target.spaceId, url: payload.url ?? `/?s=${target.spaceId}&m=${memberId}&from=n` };
+  // And what it's about: tapping opens that exact place (a game table, Love debts, the planner…).
+  const open = payload.open ?? sectionOfTag(payload.tag) ?? undefined;
+  const full = { ...payload, open, space: target.spaceId,
+    url: payload.url ?? `/?s=${target.spaceId}&m=${memberId}&from=n${open ? `&open=${encodeURIComponent(open)}` : ""}` };
   const subs = await sql`select endpoint, p256dh, auth from push_subscriptions where member_id = ${memberId}`;
   if (subs.length === 0) return;
 

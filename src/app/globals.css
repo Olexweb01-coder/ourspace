@@ -1405,3 +1405,10 @@ button.notice { cursor: pointer; }
 .upbar { display: block; height: 3px; margin: 6px 4px 2px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
 .upbar span { display: block; height: 100%; background: var(--candle); border-radius: 2px; transition: width 0.25s linear; }
 .shell[data-theme="blush"] .upbar { background: rgba(59, 21, 38, 0.12); }
+
+/* ---------- red counts: what still needs you ---------- */
+.count-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #ff3b5c; color: #fff; font-size: 0.72rem; font-weight: 700;
+  display: inline-grid; place-items: center; line-height: 1; flex-shrink: 0; box-shadow: 0 0 0 2px var(--ink); }
+.chead__menu { position: relative; }
+.count-badge--corner { position: absolute; top: 0; right: -2px; min-width: 18px; height: 18px; font-size: 0.66rem; padding: 0 5px; }
+.dsec__title .count-badge { margin-left: 8px; vertical-align: 1px; }

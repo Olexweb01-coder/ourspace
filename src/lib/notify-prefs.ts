@@ -14,6 +14,7 @@ export const QUIET_FROM = 23, QUIET_TO = 7;
 
 export function categoryOf(tag: string | undefined): NotifyKey | null {
   if (!tag) return null;
+  if (tag.startsWith("day-")) return "days";   // special days are tagged day-<id>
   return NOTIFY_CATEGORIES.find((c) => c.tags.includes(tag))?.key ?? null;
 }
 export const isNotifyKey = (k: unknown): k is NotifyKey => NOTIFY_CATEGORIES.some((c) => c.key === k);

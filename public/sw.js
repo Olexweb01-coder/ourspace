@@ -48,19 +48,35 @@ self.addEventListener("push", (event) => {
       vibrate: isNudge ? [120, 90, 120, 600, 120, 90, 120] : [80],
       icon: "/icons/icon-192.png",
       badge: "/icons/badge-96.png",
-      data: { url: data.url || "/", space: data.space || null },
+      data: { url: data.url || "/", space: data.space || null, open: data.open || null },
     });
+    await updateBadge();
   })());
 });
 
+// The number on the Home Screen icon: how many notifications are still waiting (where the phone supports it).
+async function updateBadge() {
+  try {
+    const n = (await self.registration.getNotifications()).length;
+    if (!self.navigator.setAppBadge) return;
+    if (n > 0) await self.navigator.setAppBadge(n); else await self.navigator.clearAppBadge();
+  } catch (e) { /* not supported here */ }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const d = event.notification.data || {};
   event.waitUntil((async () => {
+    await updateBadge();
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of windows) {
-      if ("focus" in c) return c.focus();
+      if ("focus" in c) {
+        // Already open: tell it what to show (a game table, Love debts, the planner…), then bring it forward.
+        c.postMessage({ type: "open", open: d.open || null, space: d.space || null });
+        return c.focus();
+      }
     }
-    // Open the installed app's own start page (it remembers the space).
-    return self.clients.openWindow("/");
+    // Not open: start the app on this notification's own space and place.
+    return self.clients.openWindow(d.url || "/");
   })());
 });

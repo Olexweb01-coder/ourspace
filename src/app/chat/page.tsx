@@ -38,7 +38,7 @@ import { ANGRY, LOVE, onlyLoveAndAngry } from "@/lib/emoji";
 import { dayLabel, initial, isOnline, sinceLabel, timeOf } from "@/lib/format";
 import { personalizeInstall } from "@/lib/install";
 import {
-  compressImage, forgetAllMediaUrls, forgetMediaUrl, formatBytes, mediaUrl, uploadEncrypted, type MediaPayload,
+  compressImage, forgetAllMediaUrls, forgetMediaUrl, formatBytes, mediaUrl, primeMediaUrl, uploadEncrypted, type MediaPayload,
   videoPreview,
 } from "@/lib/media-client";
 import { MAX_BYTES, type Theme } from "@/lib/media-limits";
@@ -92,7 +92,6 @@ type Info = Omit<SyncResponse, "messages" | "now" | "moods" | "specialDays" | "c
 type TextPayload = { t: "text"; body: string };
 type Payload = (TextPayload | MediaPayload) & { reply?: ReplyRef };
 type Usage = { spaceBytes: number; keptBytes: number; totalBytes: number; limitBytes: number; uploadsThisMonth: number; uploadLimit: number };
-type Upload = { id: string; label: string; pct: number };
 type OnceView = { kind: "text"; text: string } | { kind: "photo" | "video" | "voice"; url: string; mediaId: string; caption?: string };
 
 // The game tables (and the 3D library) load only when you open a game.
@@ -135,7 +134,6 @@ export default function ChatPage() {
   const [draft, setDraft] = useState("");
   const [viewOnce, setViewOnce] = useState(false);
   const [sending, setSending] = useState(false);
-  const [uploads, setUploads] = useState<Upload[]>([]);
   const [recording, setRecording] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [once, setOnce] = useState<OnceView | null>(null);
@@ -554,7 +552,7 @@ export default function ChatPage() {
   useEffect(() => {
     const el = listRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [visible.length, ready, uploads.length]);
+  }, [visible.length, ready]);
 
   // Grow the message box with what you type (Safari doesn't support field-sizing yet).
   useEffect(() => {
@@ -681,26 +679,103 @@ export default function ChatPage() {
     }
   }
 
-  /** Encrypts, uploads with a progress bar, then sends the message that points to it. */
-  async function sendMedia(label: string, bytes: ArrayBuffer, build: (mediaId: string, caption?: string) => MediaPayload,
-                           opts?: { caption?: string; once?: boolean }) {
+  // ---------- media, instantly: the bubble shows at once from this phone's copy; it uploads and sends in the background ----------
+  type MediaJob = {
+    tmp: string; clientId: string; mediaId: string; label: string; localUrl: string | null; once: boolean; uploaded: boolean;
+    getBytes: () => Promise<ArrayBuffer>; refine?: () => Promise<Partial<MediaPayload> | null>;
+  };
+  const mediaJobs = useRef(new Map<string, MediaJob>());
+  const [upPct, setUpPct] = useState<Record<string, number>>({});
+
+  function sendMedia(label: string, getBytes: () => Promise<ArrayBuffer>, build: (mediaId: string, caption?: string) => MediaPayload,
+                     opts?: { caption?: string; once?: boolean }, localUrl?: string | null, refine?: MediaJob["refine"]) {
     const v = vaultRef.current;
     if (!v) return;
     const fromPreview = opts !== undefined;
     const caption = (fromPreview ? opts!.caption ?? "" : onlyLoveAndAngry(draft)).trim() || undefined;
-    const job: Upload = { id: crypto.randomUUID(), label, pct: 0 };
-    setUploads((u) => [...u, job]);
+    const once = fromPreview ? !!opts!.once : viewOnce;
+    const mediaId = crypto.randomUUID();
+    if (localUrl) primeMediaUrl(mediaId, localUrl);
+    const base = build(mediaId, caption);
+    const payload: Payload = reply ? { ...base, reply } : base;
+    const clientId = crypto.randomUUID();
+    const tmp = `tmp-${clientId}`;
+    payloads.current.set(tmp, payload);
+    setMsgs((prev) => {
+      const next = new Map(prev);
+      next.set(tmp, {
+        id: tmp, senderId: v.memberId, kind: base.t, viewOnce: once, viewedAt: null, deleted: false, reactions: {},
+        expiresAt: null, createdAt: new Date().toISOString(), iv: null, ct: null,
+        media: { id: mediaId, keptBy: null, expiresAt: null, gone: false },
+      });
+      return next;
+    });
     atBottom.current = true;
+    setReply(null);
+    setViewOnce(false);
+    if (caption && !fromPreview) setDraft("");
+    const job: MediaJob = { tmp, clientId, mediaId, label, localUrl: localUrl ?? null, once, uploaded: false, getBytes, refine };
+    mediaJobs.current.set(tmp, job);
+    void runMedia(job);
+  }
+
+  async function runMedia(job: MediaJob) {
+    const v = vaultRef.current;
+    if (!v || delivering.current.has(job.tmp)) return;
+    delivering.current.add(job.tmp);
+    setUnsent((u) => { if (!u.has(job.tmp)) return u; const n = new Set(u); n.delete(job.tmp); return n; });
+    setUpPct((x) => ({ ...x, [job.tmp]: 0 }));
     try {
-      const mediaId = await uploadEncrypted(v, bytes, "message", (pct) =>
-        setUploads((u) => u.map((x) => (x.id === job.id ? { ...x, pct } : x))));
-      await postMessage(build(mediaId, caption), mediaId, fromPreview ? !!opts!.once : viewOnce);
-      if (caption && !fromPreview) setDraft("");
+      if (job.refine) {
+        const extra = await job.refine().catch(() => null);   // e.g. a video's preview picture, made after the bubble shows
+        job.refine = undefined;
+        const cur = payloads.current.get(job.tmp);
+        if (extra && cur) { payloads.current.set(job.tmp, { ...cur, ...extra } as Payload); bump(); }
+      }
+      if (!job.uploaded) {
+        const bytes = await job.getBytes();
+        await uploadEncrypted(v, bytes, "message", (pct) => setUpPct((x) => (x[job.tmp] === pct ? x : { ...x, [job.tmp]: pct })), job.mediaId);
+        job.uploaded = true;
+      }
+      const payload = payloads.current.get(job.tmp) as Payload;
+      const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
+      let res: { id: string; createdAt: string; expiresAt: string | null } | null = null;
+      for (const wait of [0, 1000, 3000, 8000]) {
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        try {
+          res = await api<{ id: string; createdAt: string; expiresAt: string | null }>("/api/messages", {
+            body: { iv, ct, viewOnce: job.once, kind: payload.t, mediaId: job.mediaId, clientId: job.clientId },
+          });
+          break;
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) { if ((await reconnect()) === "locked") { lockOut(); return; } continue; }
+          if (err instanceof ApiError && err.status < 500 && err.status !== 408 && err.status !== 429) throw err;
+        }
+      }
+      if (!res) throw new Error(`${job.label} didn't send. Tap the mark to try again.`);
+      payloadIv.current.set(job.tmp, iv);
+      mediaJobs.current.delete(job.tmp);
+      delivered(job.tmp, res);
+      const sent = res;
+      // Keep the encrypted copy with it, so the on-phone cache can show it after a restart.
+      setMsgs((prev) => { const m = prev.get(sent.id); if (!m || m.iv) return prev; const next = new Map(prev); next.set(sent.id, { ...m, iv, ct }); return next; });
+      void syncNow();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) return lockOut();
-      setToast((err as Error).message || `${label} didn't send. Try again.`);
+      if (err instanceof ApiError && err.status === 401) { lockOut(); return; }
+      if (!job.uploaded) {
+        // A fresh file id for the next try, so a half-finished upload never gets in the way.
+        const fresh = crypto.randomUUID();
+        if (job.localUrl) primeMediaUrl(fresh, job.localUrl);
+        job.mediaId = fresh;
+        const cur = payloads.current.get(job.tmp);
+        if (cur && cur.t !== "text") payloads.current.set(job.tmp, { ...cur, mediaId: fresh });
+        setMsgs((prev) => { const m = prev.get(job.tmp); if (!m) return prev; const next = new Map(prev); next.set(job.tmp, { ...m, media: { id: fresh, keptBy: null, expiresAt: null, gone: false } }); return next; });
+      }
+      setUnsent((u) => new Set(u).add(job.tmp));
+      setToast(err instanceof ApiError ? err.message : (err as Error).message || `${job.label} didn't send. Tap the mark to try again.`);
     } finally {
-      setUploads((u) => u.filter((x) => x.id !== job.id));
+      delivering.current.delete(job.tmp);
+      setUpPct((x) => { if (!(job.tmp in x)) return x; const c = { ...x }; delete c[job.tmp]; return c; });
     }
   }
 
@@ -743,16 +818,18 @@ export default function ChatPage() {
           const bmp = await createImageBitmap(file);
           const dims = { w: bmp.width, h: bmp.height };
           bmp.close();
-          await sendMedia("Photo", await file.arrayBuffer(), (mediaId, caption) =>
-            ({ t: "photo", mediaId, mime: "image/gif", ...dims, size: file.size, caption }), o);
+          sendMedia("Photo", () => file.arrayBuffer(), (mediaId, caption) =>
+            ({ t: "photo", mediaId, mime: "image/gif", ...dims, size: file.size, caption }), o, URL.createObjectURL(file));
           continue;
         }
         const img = await compressImage(file, 1600);
-        await sendMedia("Photo", img.bytes, (mediaId, caption) =>
-          ({ t: "photo", mediaId, mime: "image/jpeg", w: img.w, h: img.h, thumb: img.thumb, size: img.bytes.byteLength, caption }), o);
+        // Each photo shows straight away; they all upload at the same time.
+        sendMedia("Photo", async () => img.bytes, (mediaId, caption) =>
+          ({ t: "photo", mediaId, mime: "image/jpeg", w: img.w, h: img.h, thumb: img.thumb, size: img.bytes.byteLength, caption }), o,
+          URL.createObjectURL(new Blob([img.bytes], { type: "image/jpeg" })));
       } catch {
         // A format this phone can't draw (e.g. some HEIC files): send it as a file instead.
-        await sendFile(file);
+        sendFile(file);
       }
     }
   }
@@ -766,28 +843,31 @@ export default function ChatPage() {
     openPreview("video", [file]);
   }
   async function sendVideo(file: File, opts: { caption?: string; once?: boolean }) {
-    const prev = await videoPreview(file);   // shows on her phone before the video downloads
-    await sendMedia("Video", await file.arrayBuffer(), (mediaId, caption) =>
-      ({ t: "video", mediaId, mime: file.type || "video/mp4", name: file.name || "video.mp4", size: file.size, caption, ...(prev ?? {}) }), opts);
+    // The bubble shows now; the preview picture (shown on her phone before the video downloads) is made in the background.
+    sendMedia("Video", () => file.arrayBuffer(), (mediaId, caption) =>
+      ({ t: "video", mediaId, mime: file.type || "video/mp4", name: file.name || "video.mp4", size: file.size, caption }), opts,
+      URL.createObjectURL(file), async () => (await videoPreview(file)) ?? null);
   }
 
-  async function sendFile(file: File) {
+  function sendFile(file: File) {
     if (file.size > MAX_BYTES.message) return setToast(`Files can be up to ${formatBytes(MAX_BYTES.message)}.`);
-    await sendMedia("File", await file.arrayBuffer(), (mediaId, caption) =>
-      ({ t: "file", mediaId, mime: file.type || "application/octet-stream", name: file.name || "file", size: file.size, caption }));
+    sendMedia("File", () => file.arrayBuffer(), (mediaId, caption) =>
+      ({ t: "file", mediaId, mime: file.type || "application/octet-stream", name: file.name || "file", size: file.size, caption }),
+      undefined, URL.createObjectURL(file));
   }
 
   async function onFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     setAttachOpen(false);
-    if (file) await sendFile(file);
+    if (file) sendFile(file);
   }
 
   async function onVoice(bytes: ArrayBuffer, mime: string, seconds: number, wave: number[]) {
     setRecording(false);
-    await sendMedia("Voice note", bytes, (mediaId) =>
-      ({ t: "voice", mediaId, mime, duration: Math.round(seconds), size: bytes.byteLength, ...(wave.length ? { wave } : {}) }));
+    sendMedia("Voice note", async () => bytes, (mediaId) =>
+      ({ t: "voice", mediaId, mime, duration: Math.round(seconds), size: bytes.byteLength, ...(wave.length ? { wave } : {}) }),
+      undefined, URL.createObjectURL(new Blob([bytes], { type: mime })));
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -1490,7 +1570,7 @@ export default function ChatPage() {
         >
           <p className="e2e-note glass">Messages, photos and voice notes here are end-to-end encrypted. Only the two of you can read them.</p>
 
-          {visible.length === 0 && uploads.length === 0 && (
+          {visible.length === 0 && (
             <div className="empty">
               {partner ? <p>Nothing here yet. Say the first thing.</p> : (
                 <>
@@ -1553,7 +1633,7 @@ export default function ChatPage() {
                   edited={!!m.editedAt}
                   disappears={!!m.expiresAt}
                   ticks={!mine ? "none" : unsent.has(m.id) ? "failed" : m.id.startsWith("tmp-") ? "pending" : m.viewOnce ? "none" : seen ? "seen" : "sent"}
-                  onRetry={() => { const o = vault && readOutbox(vault.spaceId).find((x) => x.tmp === m.id); if (o) void deliver(o); }}
+                  onRetry={() => { const j = mediaJobs.current.get(m.id); if (j) { void runMedia(j); return; } const o = vault && readOutbox(vault.spaceId).find((x) => x.tmp === m.id); if (o) void deliver(o); }}
                   reply={payload && "reply" in payload && payload.reply ? payload.reply : null}
                   replyName={nameOf}
                   reactions={Object.values(m.reactions)}
@@ -1592,19 +1672,16 @@ export default function ChatPage() {
                         : payload.t === "text" ? payload.body : null}
                     </span>
                   )}
+                  {upPct[m.id] !== undefined && (
+                    <span className="upbar" role="progressbar" aria-label="Sending" aria-valuenow={upPct[m.id]} aria-valuemin={0} aria-valuemax={100}>
+                      <span style={{ width: `${Math.max(4, upPct[m.id])}%` }} />
+                    </span>
+                  )}
                 </MessageRow>
               </div>
             );
           })}
 
-          {uploads.map((u) => (
-            <div key={u.id} className="row row--mine row--start">
-              <div className="b b--mine b--tail uploading">
-                Sending {u.label.toLowerCase()}… {u.pct}%
-                <span className="meter"><span style={{ width: `${u.pct}%` }} /></span>
-              </div>
-            </div>
-          ))}
           {partner?.typing && (
             <div className="row row--start typing-row" aria-live="polite" aria-label={`${partner.name} is typing`}>
               <div className="b b--tail typing-b"><span /><span /><span /></div>

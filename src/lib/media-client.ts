@@ -37,11 +37,12 @@ export async function uploadEncrypted(
   bytes: ArrayBuffer,
   purpose: MediaPurpose,
   onProgress?: (percent: number) => void,
+  presetId?: string,
 ): Promise<string> {
   if (bytes.byteLength > MAX_BYTES[purpose]) {
     throw new Error(`That's too big. The limit is ${formatBytes(MAX_BYTES[purpose])}.`);
   }
-  const mediaId = crypto.randomUUID();
+  const mediaId = presetId ?? crypto.randomUUID();
   const encrypted = await encryptBytes(vault.encKey, bytes, fileAad(vault.spaceId, mediaId));
   await upload(`spaces/${vault.spaceId}/${mediaId}.bin`, encrypted, {
     access: "private",
@@ -70,6 +71,11 @@ export function mediaUrl(vault: Vault, mediaId: string, mime: string): Promise<s
     urls.set(mediaId, p);
   }
   return p;
+}
+
+/** Shows a file you're sending from this phone's own copy, so it appears at once and never downloads again. */
+export function primeMediaUrl(mediaId: string, localUrl: string) {
+  urls.set(mediaId, Promise.resolve(localUrl));
 }
 
 export function forgetMediaUrl(mediaId: string) {

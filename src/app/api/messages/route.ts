@@ -33,19 +33,20 @@ export async function POST(req: Request) {
   const kind = (KINDS as readonly string[]).includes(body?.kind ?? "text") ? (body?.kind ?? "text") as Kind : null;
   if (!kind) return fail("Invalid message");
 
+  const sql = db();
+  // A retry of the same send (same tag from the phone) returns the first copy instead of making a second.
+  // Checked before the file is claimed, so a retry of a photo that already went through still succeeds.
+  const clientId = typeof body?.clientId === "string" && UUID_RE.test(body.clientId) ? body.clientId : null;
+  if (clientId) {
+    const dup = await sql`select id::text as id, created_at, expires_at from messages where sender_id = ${me.memberId} and client_id = ${clientId}::uuid`;
+    if (dup[0]) return json({ id: dup[0].id, createdAt: dup[0].created_at, expiresAt: dup[0].expires_at, mediaExpiresAt: null });
+  }
+
   let mediaId: string | null = null;
   if (kind !== "text") {
     const claimed = await claimMedia(me, body?.mediaId, "message");
     if (!claimed) return fail("The file didn't finish uploading. Try sending it again.");
     mediaId = claimed.id;
-  }
-
-  const sql = db();
-  // A retry of the same send (same tag from the phone) returns the first copy instead of making a second.
-  const clientId = typeof body?.clientId === "string" && UUID_RE.test(body.clientId) ? body.clientId : null;
-  if (clientId) {
-    const dup = await sql`select id::text as id, created_at, expires_at from messages where sender_id = ${me.memberId} and client_id = ${clientId}::uuid`;
-    if (dup[0]) return json({ id: dup[0].id, createdAt: dup[0].created_at, expiresAt: dup[0].expires_at, mediaExpiresAt: null });
   }
   const rows = await sql`
     insert into messages (space_id, sender_id, kind, iv, ciphertext, view_once, expires_at, media_id, client_id)

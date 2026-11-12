@@ -715,8 +715,9 @@ button.quiet-link { background: none; border: 0; padding: 6px; font: inherit; fo
    ===================================================================== */
 .glass {
   background: color-mix(in srgb, var(--plum) 58%, transparent);
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  /* 12px looks almost the same as 18px and costs about a third less to redraw. */
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .shell[data-theme="blush"] .glass { background: rgba(255, 255, 255, 0.66); border-color: rgba(59, 21, 38, 0.08); }
@@ -1320,17 +1321,20 @@ button.notice { cursor: pointer; }
   background: radial-gradient(45% 35% at 50% 40%, rgba(232, 138, 161, 0.22), transparent 70%),
               radial-gradient(35% 30% at 20% 85%, rgba(246, 201, 127, 0.14), transparent 70%),
               radial-gradient(35% 30% at 85% 15%, rgba(194, 65, 107, 0.16), transparent 70%); }
-.shell--together::before { opacity: 1; animation: breathe 6s ease-in-out infinite; }
-@keyframes breathe { 0%, 100% { transform: scale(1); filter: saturate(1); } 50% { transform: scale(1.06); filter: saturate(1.25); } }
+/* Light on the phone: only transform and opacity move, so the graphics chip slides layers instead of repainting them. */
+.shell--together::before { opacity: 1; animation: breathe 6s ease-in-out infinite; will-change: transform; }
+@keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 .shell--together .chead { box-shadow: 0 0 0 1px rgba(246, 201, 127, 0.18), 0 8px 30px rgba(232, 138, 161, 0.18); }
-.shell--together .chead .sring { animation: ringglow 2.4s ease-in-out infinite; border-radius: 999px; }
-@keyframes ringglow { 0%, 100% { box-shadow: 0 0 0 0 rgba(246, 201, 127, 0); } 50% { box-shadow: 0 0 14px 3px rgba(246, 201, 127, 0.45); } }
+.shell--together .chead .sring { position: relative; border-radius: 999px; }
+.shell--together .chead .sring::after { content: ""; position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
+  box-shadow: 0 0 14px 3px rgba(246, 201, 127, 0.45); opacity: 0; animation: ringglow 2.4s ease-in-out infinite; will-change: opacity; }
+@keyframes ringglow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 .shell--together .pill { box-shadow: 0 0 0 1px rgba(232, 138, 161, 0.35), 0 6px 26px rgba(232, 138, 161, 0.22); transition: box-shadow 1s; }
 .arrival { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 76px); transform: translateX(-50%); z-index: 15; pointer-events: none;
   padding: 8px 16px; border-radius: 999px; background: rgba(42, 20, 33, 0.85); color: var(--candle); font-weight: 600; font-size: 0.9rem;
   box-shadow: 0 8px 30px rgba(232, 138, 161, 0.35); animation: arrive 3.2s ease forwards; }
 @keyframes arrive { 0% { opacity: 0; transform: translate(-50%, -8px) scale(0.96); } 12%, 80% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -6px); } }
-@media (prefers-reduced-motion: reduce) { .shell--together::before, .shell--together .chead .sring, .arrival { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .shell--together::before, .shell--together .chead .sring::after, .arrival { animation: none; } }
 
 /* ---------- voice waves, video previews ---------- */
 .recorder__bars, .voice__wave { display: flex; align-items: center; gap: 2px; height: 30px; flex: 1; min-width: 0; }
@@ -1353,8 +1357,8 @@ button.notice { cursor: pointer; }
 .whatsnew__list { margin: 0 0 16px; padding-left: 1.1em; display: flex; flex-direction: column; gap: 8px; color: var(--blush); font-size: 0.95rem; max-height: 50vh; overflow-y: auto; }
 
 /* ---------- together, stronger: floating hearts and a warmer glow everywhere ---------- */
-.together-air { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }   /* behind the messages (.list is 1) */
-.together-air span { position: absolute; bottom: -40px; color: var(--rose); opacity: 0; font-size: 14px; animation: drift 18s linear infinite; }
+.together-air { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; contain: strict; }   /* behind the messages (.list is 1) */
+.together-air span { position: absolute; bottom: -40px; color: var(--rose); opacity: 0; font-size: 14px; animation: drift 18s linear infinite; will-change: transform, opacity; }
 .together-air span:nth-child(1) { left: 8%;  animation-delay: 0s;   font-size: 12px; }
 .together-air span:nth-child(2) { left: 22%; animation-delay: 6s;   font-size: 18px; animation-duration: 22s; }
 .together-air span:nth-child(3) { left: 36%; animation-delay: 11s;  font-size: 10px; }

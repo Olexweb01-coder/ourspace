@@ -202,6 +202,7 @@ export default function ChatPage() {
   const [canSwitch, setCanSwitch] = useState(false);
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
+  const saveCopyRef = useRef<() => void>(() => {});
   // Red badges: what notifications were about, kept until you open that part of the app.
   const [badges, setBadges] = useState<Partial<Record<Section, number>>>({});
   const badgeKey = (spaceId: string) => `ourspace:badges:${spaceId}`;
@@ -453,6 +454,7 @@ export default function ChatPage() {
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         hiddenAt.current = Date.now();
+        saveCopyRef.current();   // leaving the app: save the latest copy once
       } else {
         if (hiddenAt.current && Date.now() - hiddenAt.current > LOCK_AFTER_MS) return lockOut();
         hiddenAt.current = null;
@@ -1231,16 +1233,23 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notif, hasPartner, aboutOpen]);
 
-  // Keep the on-phone copy fresh: a moment after the chat changes, save it (encrypted).
-  useEffect(() => {
+  // Keep the on-phone copy fresh (encrypted). Only when messages or calls actually change, a moment after the
+  // last change, and once more when you leave the app. Never on every check: encrypting 300 messages is real work.
+  const latestForCache = useRef({ msgs, calls, info });
+  latestForCache.current = { msgs, calls, info };
+  saveCopyRef.current = () => {
     const v = vaultRef.current;
-    if (!v || !info || !cursor.current) return;
-    const t = setTimeout(() => {
-      const keep = Array.from(msgs.values()).filter((m) => !m.id.startsWith("tmp-")).sort((a, b) => Number(a.id) - Number(b.id)).slice(-300);
-      void saveCache(v, { cursor: cursor.current, info, messages: keep, calls });
-    }, 1500);
+    const { msgs: ms, calls: cs, info: inf } = latestForCache.current;
+    if (!v || !inf || !cursor.current) return;
+    const keep = Array.from(ms.values()).filter((m) => !m.id.startsWith("tmp-")).sort((a, b) => Number(a.id) - Number(b.id)).slice(-300);
+    void saveCache(v, { cursor: cursor.current, info: inf, messages: keep, calls: cs });
+  };
+  useEffect(() => {
+    if (!info) return;
+    const t = setTimeout(() => saveCopyRef.current(), 2000);
     return () => clearTimeout(t);
-  }, [info, msgs, calls]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msgs, calls, !!info]);
 
   // ---------- back gestures (iPhone swipe, Android back): stay in the app ----------
   // Close whatever is on top; with nothing open, the side panel opens. Never back to the passcode screen.

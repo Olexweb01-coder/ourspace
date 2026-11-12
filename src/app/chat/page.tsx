@@ -27,8 +27,9 @@ import LockSetup from "@/components/LockSetup";
 import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
 import { useUpdateReady, useWhatsNew, WhatsNew } from "@/components/UpdateNotice";
-import { SBlock, SGroup, SRow } from "@/components/settings/Rows";
+import { SBlock, SGroup, SRow, SSwitch } from "@/components/settings/Rows";
 import DisguiseSettings from "@/components/settings/DisguiseSettings";
+import { applyLite, isLite, setLite } from "@/lib/lite";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
@@ -249,6 +250,7 @@ export default function ChatPage() {
   // Where a tapped notification (or card) should take you, once the chat is ready.
   const pendingOpen = useRef<OpenTarget | null>(null);
   const [openTick, setOpenTick] = useState(0);
+  const [liteOn, setLiteOn] = useState(false);
   const [gamesFocus, setGamesFocus] = useState<"debts" | null>(null);
   const [gamesGame, setGamesGame] = useState<string | null>(null);
   const updateReady = useUpdateReady();
@@ -280,6 +282,8 @@ export default function ChatPage() {
       return;
     }
     vaultRef.current = v;
+    applyLite();
+    setLiteOn(isLite());
     try { setBadges(JSON.parse(localStorage.getItem(`ourspace:badges:${v.spaceId}`) || "{}")); } catch { /* none yet */ }
     try {
       const want = new URLSearchParams(window.location.search).get("open") ?? sessionStorage.getItem("ourspace:open");
@@ -2026,6 +2030,8 @@ export default function ChatPage() {
                   </button>
                   {info.space.backgroundMediaId && <button className="btn btn--ghost btn--small" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>}
                 </SRow>
+                <SSwitch label="Battery saver" hint="On this phone: moving effects hold still and the frosted glass becomes solid. Everything else stays."
+                  on={liteOn} onChange={(on) => { setLite(on); setLiteOn(on); setToast(on ? "Battery saver on" : "Battery saver off"); }} />
                 <SBlock label="Disappearing messages" hint={disappear.value === null ? "Off. Messages stay." : `New messages disappear after ${disappear.label}.`}>
                   <div className="chips chips--left">
                     {DISAPPEAR_OPTIONS.map((o) => (

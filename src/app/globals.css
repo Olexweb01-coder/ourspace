@@ -1440,3 +1440,10 @@ button.notice { cursor: pointer; }
 .dicon:disabled { opacity: 0.6; }
 .disguise__how { margin: 0; }
 .shell[data-theme="blush"] .dicon__plus { background: rgba(59, 21, 38, 0.06); }
+
+/* ---------- battery saver (Settings > Chat): nothing removed, just still and solid ---------- */
+html.lite .together-air { display: none; }
+html.lite .shell--together::before, html.lite .chead--live .heartline__path, html.lite .live__pulse { animation: none !important; }
+html.lite .shell--together .chead .sring::after { animation: none; opacity: 0.6; }
+html.lite .glass { backdrop-filter: none; -webkit-backdrop-filter: none; background: color-mix(in srgb, var(--plum) 94%, var(--ink)); }
+html.lite .shell[data-theme="blush"] .glass { background: rgba(255, 255, 255, 0.96); }

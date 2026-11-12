@@ -27,6 +27,7 @@ import LockSetup from "@/components/LockSetup";
 import MoodCard from "@/components/MoodCard";
 import Planner from "@/components/Planner";
 import { useUpdateReady, useWhatsNew, WhatsNew } from "@/components/UpdateNotice";
+import { SBlock, SGroup, SRow } from "@/components/settings/Rows";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import { api, ApiError } from "@/lib/api";
@@ -1750,88 +1751,82 @@ export default function ChatPage() {
             <button type="button" className="btn btn--ghost btn--small" onClick={() => setMenuOpen(false)}>Done</button>
           </header>
           <div className="planner__body">
-            <section className="dsettings" aria-label="Settings">
-            <div className="sheet__group">
-              <p className="sheet__title">About you</p>
-              <p className="hint">{myGender ? `${myGender === "woman" ? "Woman" : "Man"}` : "Not set"}{birthdayOf(me.id) ? ` · birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}</p>
-              <button className="btn btn--ghost" onClick={() => setAboutOpen(true)}>Edit</button>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Your photo</p>
-              <div className="row">
-                <button className="btn btn--ghost" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
-                  {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change photo" : "Add a photo"}
-                </button>
-                {myAvatar && <button className="btn btn--ghost" onClick={removeAvatar}>Remove</button>}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Theme</p>
-              <div className="chips chips--left">
-                {THEME_OPTIONS.map((t) => (
-                  <button key={t.value} className={t.value === info.space.theme ? "chip chip--on" : "chip"} onClick={() => saveSettings({ theme: t.value }, `${t.label} theme on`)}>{t.label}</button>
-                ))}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Chat background</p>
-              <div className="row">
-                <button className="btn btn--ghost" onClick={() => backgroundInput.current?.click()} disabled={busySetting === "background"}>
-                  {busySetting === "background" ? "Uploading…" : info.space.backgroundMediaId ? "Change background" : "Choose a photo"}
-                </button>
-                {info.space.backgroundMediaId && <button className="btn btn--ghost" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Disappearing messages</p>
-              <div className="chips chips--left">
-                {DISAPPEAR_OPTIONS.map((o) => (
-                  <button key={o.label} className={o.value === disappear.value ? "chip chip--on" : "chip"}
-                    onClick={() => saveSettings({ disappearSeconds: o.value }, o.value === null ? "Messages stay" : "New messages will disappear")}>{o.label}</button>
-                ))}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Storage</p>
-              {usage ? (
-                <>
-                  <div className="meter" role="img" aria-label={`${usedPct}% of storage used`}><span style={{ width: `${usedPct}%` }} /></div>
-                  <p className="hint">{formatBytes(usage.totalBytes)} of {formatBytes(usage.limitBytes)} used, {formatBytes(usage.keptBytes)} kept. Uploads this month: {usage.uploadsThisMonth} of {usage.uploadLimit.toLocaleString()}.</p>
-                </>
-              ) : <p className="hint">Checking…</p>}
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">App lock on this phone</p>
-              <p className="hint">{lockKind ? `Opens with your ${LOCK_LABEL[lockKind].toLowerCase()}.` : "Off. You type the shared password each time."}</p>
-              <div className="row">
-                <button className="btn btn--ghost" onClick={() => { setDrawerOpen(false); setLockSetupOpen(true); }}>{lockKind ? "Change" : "Set a PIN, pattern or password"}</button>
-                {lockKind && <button className="btn btn--ghost" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
-              </div>
-            </div>
-            <div className="sheet__group">
-              <p className="sheet__title">Notifications</p>
-              <NotifySettings state={notif} off={info.members.find((m) => m.id === me.id)?.notifyOff ?? []}
-                quiet={info.members.find((m) => m.id === me.id)?.notifyQuiet ?? false} partnerName={partnerName}
-                onTurnOn={turnOnNotifications} onToast={setToast} />
-            </div>
-            {me.role === "host" && (
-              <>
-                <div className="sheet__group">
-                  <p className="sheet__title">Invite link</p>
-                  {invite ? <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />
-                    : <button className="btn btn--ghost" onClick={makeInvite}>{partner ? `Make a link for ${partner.name}'s new phone` : "Make an invite link"}</button>}
+            <div className="settings">
+              <SGroup title="Profile">
+                <SRow label="About you" onClick={() => setAboutOpen(true)}
+                  hint={`${myGender ? (myGender === "woman" ? "Woman" : "Man") : "Not set"}${birthdayOf(me.id) ? `, birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}`} />
+                <SRow label="Your photo" hint={myAvatar ? "Shown to both of you" : "No photo yet"}>
+                  <button className="btn btn--ghost btn--small" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
+                    {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change" : "Add"}
+                  </button>
+                  {myAvatar && <button className="btn btn--ghost btn--small" onClick={removeAvatar}>Remove</button>}
+                </SRow>
+              </SGroup>
+
+              <SGroup title="Chat" foot="Theme, background and disappearing messages change for both of you.">
+                <SBlock label="Theme">
+                  <div className="chips chips--left">
+                    {THEME_OPTIONS.map((t) => (
+                      <button key={t.value} className={t.value === info.space.theme ? "chip chip--on" : "chip"} onClick={() => saveSettings({ theme: t.value }, `${t.label} theme on`)}>{t.label}</button>
+                    ))}
+                  </div>
+                </SBlock>
+                <SRow label="Chat background" hint={info.space.backgroundMediaId ? "Your photo" : "The heart pattern"}>
+                  <button className="btn btn--ghost btn--small" onClick={() => backgroundInput.current?.click()} disabled={busySetting === "background"}>
+                    {busySetting === "background" ? "Uploading…" : info.space.backgroundMediaId ? "Change" : "Choose"}
+                  </button>
+                  {info.space.backgroundMediaId && <button className="btn btn--ghost btn--small" onClick={() => saveSettings({ backgroundMediaId: null }, "Background removed")}>Remove</button>}
+                </SRow>
+                <SBlock label="Disappearing messages" hint={disappear.value === null ? "Off. Messages stay." : `New messages disappear after ${disappear.label}.`}>
+                  <div className="chips chips--left">
+                    {DISAPPEAR_OPTIONS.map((o) => (
+                      <button key={o.label} className={o.value === disappear.value ? "chip chip--on" : "chip"}
+                        onClick={() => saveSettings({ disappearSeconds: o.value }, o.value === null ? "Messages stay" : "New messages will disappear")}>{o.label}</button>
+                    ))}
+                  </div>
+                </SBlock>
+              </SGroup>
+
+              <SGroup title="Notifications">
+                <div className="srow srow--block">
+                  <NotifySettings state={notif} off={info.members.find((m) => m.id === me.id)?.notifyOff ?? []}
+                    quiet={info.members.find((m) => m.id === me.id)?.notifyQuiet ?? false} partnerName={partnerName}
+                    onTurnOn={turnOnNotifications} onToast={setToast} />
                 </div>
-                <div className="sheet__group">
-                  <p className="sheet__title">Another space</p>
-                  <button className="btn btn--ghost" onClick={() => router.push("/setup")}>Start a space with someone new</button>
+              </SGroup>
+
+              <SGroup title="Privacy and lock" foot="The app always locks itself after 2 minutes in the background.">
+                <SRow label="App lock on this phone" hint={lockKind ? `Opens with your ${LOCK_LABEL[lockKind].toLowerCase()}` : "Off. You type the shared password each time."}>
+                  <button className="btn btn--ghost btn--small" onClick={() => { setDrawerOpen(false); setLockSetupOpen(true); }}>{lockKind ? "Change" : "Set up"}</button>
+                  {lockKind && <button className="btn btn--ghost btn--small" onClick={async () => { await removeLock(vault.spaceId); setLockKind(null); setToast("App lock turned off on this phone"); }}>Turn off</button>}
+                </SRow>
+                <SRow label="Lock now" hint="Locks this phone straight away" onClick={lockNow} />
+              </SGroup>
+
+              <SGroup title="Storage" foot="Files disappear after 30 days unless one of you taps Keep.">
+                <div className="srow srow--block">
+                  {usage ? (
+                    <>
+                      <div className="meter" role="img" aria-label={`${usedPct}% of storage used`}><span style={{ width: `${usedPct}%` }} /></div>
+                      <p className="hint">{formatBytes(usage.totalBytes)} of {formatBytes(usage.limitBytes)} used, {formatBytes(usage.keptBytes)} kept. Uploads this month: {usage.uploadsThisMonth} of {usage.uploadLimit.toLocaleString()}.</p>
+                    </>
+                  ) : <p className="hint">Checking…</p>}
                 </div>
-                <div className="sheet__group">
-                  <p className="sheet__title">Host password</p>
-                  <HostPasswordForm onToast={setToast} />
-                </div>
-              </>
-            )}
-          </section>
+              </SGroup>
+
+              {me.role === "host" && (
+                <SGroup title="Host" foot="Only you see this section.">
+                  <SBlock label="Invite link" hint={partner ? `For ${partner.name}'s new phone` : "For your partner"}>
+                    {invite ? <InviteBox url={invite.inviteUrl} expiresAt={invite.expiresAt} />
+                      : <button className="btn btn--ghost btn--small" onClick={makeInvite}>Make a link</button>}
+                  </SBlock>
+                  <SRow label="Start another space" hint="With someone new" onClick={() => router.push("/setup")} />
+                  <SBlock label="Host password" hint="Needed to start new spaces">
+                    <HostPasswordForm onToast={setToast} />
+                  </SBlock>
+                </SGroup>
+              )}
+            </div>
           </div>
         </div>
       )}

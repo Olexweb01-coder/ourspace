@@ -1375,3 +1375,28 @@ button.notice { cursor: pointer; }
 .shell--together .planner__head { box-shadow: 0 1px 0 rgba(246, 201, 127, 0.18); }
 .shell--together .chead__name { text-shadow: 0 0 18px rgba(246, 201, 127, 0.45); }
 @media (prefers-reduced-motion: reduce) { .together-air { display: none; } }
+
+/* ---------- settings: grouped like a phone's settings ---------- */
+.settings { display: flex; flex-direction: column; gap: 22px; padding-bottom: 24px; }
+.sgroup__title { margin: 0 0 8px 14px; font-size: 0.82rem; font-weight: 600; color: var(--candle); letter-spacing: 0.01em; }
+.sgroup__card { border-radius: 18px; background: rgba(255, 255, 255, 0.045); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); overflow: hidden; }
+.sgroup__foot { margin: 7px 14px 0; color: var(--muted); font-size: 0.78rem; }
+.srow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 14px; min-height: 56px; border: 0; background: none; color: var(--blush); font: inherit; text-align: left; }
+.srow + .srow { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+.srow--tap { cursor: pointer; }
+.srow--tap:active { background: rgba(255, 255, 255, 0.05); }
+.srow--tap:disabled { opacity: 0.55; }
+.srow__text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.srow__text strong { font-weight: 600; }
+.srow__text small { color: var(--muted); font-size: 0.8rem; }
+.srow__end { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.srow__chev { width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-width: 2; flex-shrink: 0; }
+.srow--block { flex-direction: column; align-items: stretch; gap: 10px; }
+.srow__body { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.srow--block .nset__row { padding-left: 0; padding-right: 0; }
+.srow--block .nset__row:last-child { border-bottom: 0; }
+.srow--block .meter { width: 100%; }
+@media (max-width: 360px) { .srow:not(.srow--block) { flex-wrap: wrap; } .srow__end { justify-content: flex-start; } }
+.shell[data-theme="blush"] .sgroup__card { background: rgba(59, 21, 38, 0.04); box-shadow: inset 0 0 0 1px rgba(59, 21, 38, 0.1); }
+.shell[data-theme="blush"] .srow + .srow { box-shadow: inset 0 1px 0 rgba(59, 21, 38, 0.08); }
+.shell[data-theme="blush"] .srow--tap:active { background: rgba(59, 21, 38, 0.05); }

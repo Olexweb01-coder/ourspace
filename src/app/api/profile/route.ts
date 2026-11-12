@@ -15,6 +15,11 @@ export async function POST(req: Request) {
     const g = body.gender;
     if (g !== null && g !== "man" && g !== "woman") return fail("Choose man or woman.");
     await sql`update members set gender = ${g}::text where id = ${me.memberId}`;
+    // Cycle tracking is only for women. A man's Cycle tab is a care page, so any entries he made are removed.
+    if (g === "man") {
+      await sql`delete from care_reminders where owner_id = ${me.memberId} and sent_at is null`;
+      await sql`delete from cycles where member_id = ${me.memberId}`;
+    }
   }
 
   if ("avatarMediaId" in body) {

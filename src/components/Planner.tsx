@@ -13,6 +13,7 @@ type Props = {
   vault: Vault;
   me: Person;
   partner: Person | null;
+  myGender?: "man" | "woman" | null;
   today: string;
   onClose: () => void;
   onChanged: () => void;
@@ -43,7 +44,8 @@ const prettyDate = (m: number, d: number) => `${d} ${MONTHS[m - 1]}`;
 const prettyDay = (day: string) => prettyDate(Number(day.slice(5, 7)), Number(day.slice(8, 10)));
 const localAt = (day: string, hour: number) => new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)), hour, 0).toISOString();
 
-export default function Planner({ vault, me, partner, today, onClose, onChanged, onToast }: Props) {
+export default function Planner({ vault, me, partner, myGender = null, today, onClose, onChanged, onToast }: Props) {
+  const isMan = myGender === "man";
   const [tab, setTab] = useState<Tab>("days");
   const [data, setData] = useState<Loaded | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,14 +103,15 @@ export default function Planner({ vault, me, partner, today, onClose, onChanged,
       <nav className="tabs" role="tablist">
         {TABS.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "tab tab--on" : "tab"} onClick={() => setTab(t.key)}>
-            {t.label}
+            {t.key === "cycle" && isMan ? "Care" : t.label}
           </button>
         ))}
       </nav>
       <div className="planner__body">
         {!data ? <p className="hint">Unlocking your plans…</p>
           : tab === "days" ? <DaysTab data={data} me={me} partner={partner} today={today} busy={busy} act={act} seal={seal} />
-          : tab === "cycle" ? <CycleTab data={data} me={me} partner={partner} today={today} busy={busy} act={act} seal={seal} />
+          : tab === "cycle" ? (isMan ? <CareTab data={data} partner={partner} today={today} />
+            : <CycleTab data={data} me={me} partner={partner} today={today} busy={busy} act={act} seal={seal} sure={myGender === "woman"} />)
           : tab === "goals" ? <GoalsTab data={data} me={me} partner={partner} today={today} busy={busy} act={act} seal={seal} />
           : <TalkTab data={data} me={me} partner={partner} today={today} busy={busy} act={act} seal={seal} />}
       </div>
@@ -240,7 +243,7 @@ function DaysTab({ data, me, partner, today, busy, act, seal }: TabProps) {
 }
 
 // ---------------- cycle ----------------
-function CycleTab({ data, me, partner, today, busy, act, seal }: TabProps) {
+function CycleTab({ data, me, partner, today, busy, act, seal, sure }: TabProps & { sure: boolean }) {
   const mine = data.cycles[me.id] ?? EMPTY_CYCLE;
   const [logDate, setLogDate] = useState(today);
   const prediction = predictCycle(mine, today);
@@ -278,7 +281,7 @@ function CycleTab({ data, me, partner, today, busy, act, seal }: TabProps) {
 
       <div className="pform">
         <p className="sheet__title">Your cycle</p>
-        <p className="hint">Only if this applies to you. Every date is encrypted on your phone.</p>
+        <p className="hint">{sure ? "" : "Only if this applies to you. "}Every date is encrypted on your phone.</p>
         {prediction && <div className="care-card"><p>{summary(prediction, "your")}</p><p className="hint">Your cycles average {prediction.avgCycle} days.</p></div>}
 
         <label className="label" htmlFor="cy-date">A period started on</label>
@@ -317,6 +320,63 @@ function CycleTab({ data, me, partner, today, busy, act, seal }: TabProps) {
           Gentle reminder 2 days before{mine.share && partner ? `, and a heads-up to ${partner.name} the day before` : ""}
         </label>
         <p className="hint">Predictions are estimates from your own history. Don&apos;t rely on them for birth control. Reminders only say &quot;a gentle heads-up&quot;, never why.</p>
+      </div>
+    </>
+  );
+}
+
+// ---------------- care (his side) ----------------
+// A man doesn't log a cycle. He sees hers, if she shares it, and how to look after her right now.
+const CARE_TIPS: Record<"period" | "soon" | "calm", string[]> = {
+  period: [
+    "Ask how she's feeling, and really listen.",
+    "Bring something warm: tea, a hot water bottle, her favourite food.",
+    "Take a chore off her plate without being asked.",
+    "Be patient if her mood shifts. It isn't about you.",
+    "Plan a cosy night in, her choice of film.",
+  ],
+  soon: [
+    "Her period is close. Make sure she has what she needs.",
+    "Keep the next few days light and gentle.",
+    "A small surprise goes a long way right now.",
+  ],
+  calm: [
+    "Nothing to watch for right now.",
+    "Keep loving her loudly anyway.",
+  ],
+};
+
+function CareTab({ data, partner, today }: { data: Loaded; partner: Person | null; today: string }) {
+  const theirs = partner ? data.cycles[partner.id] : undefined;
+  const p = theirs?.share ? predictCycle(theirs, today) : null;
+  if (!partner) return <p className="hint">When your partner joins, this is where you&apos;ll see how to look after her.</p>;
+  if (!p) {
+    return (
+      <div className="care-card">
+        <p><strong>{partner.name}</strong></p>
+        <p>When {partner.name} logs and shares her cycle, you&apos;ll see here when to be extra gentle, and get a heads-up the day before.</p>
+        <p className="hint">Only she can log it. Nothing for you to fill in.</p>
+      </div>
+    );
+  }
+  const phase = p.inPeriod ? "period" : p.daysUntilNext >= 0 && p.daysUntilNext <= 3 ? "soon" : "calm";
+  const line = p.inPeriod ? `Day ${p.periodDay} of ${partner.name}'s period.`
+    : p.daysUntilNext > 0 ? `${partner.name}'s next period is expected around ${prettyDay(p.nextStart)}, ${countdownLabel(p.daysUntilNext)}.`
+    : p.daysUntilNext === 0 ? `${partner.name}'s period is expected around today.`
+    : `${partner.name}'s period was expected around ${prettyDay(p.nextStart)}.`;
+  return (
+    <>
+      <div className="care-card">
+        <p><strong>{partner.name}</strong></p>
+        <p>{line}</p>
+        <p className="hint">Shared by {partner.name}. Estimates from her own history.</p>
+      </div>
+      <div className="pform">
+        <p className="sheet__title">{phase === "period" ? "Look after her today" : phase === "soon" ? "Get ready to look after her" : "All calm"}</p>
+        <ul className="plist plist--tight">
+          {CARE_TIPS[phase].map((t) => <li key={t} className="pitem"><div className="pitem__main"><span>{t}</span></div></li>)}
+        </ul>
+        <p className="hint">You get a gentle heads-up the day before, if she turned reminders on.</p>
       </div>
     </>
   );

@@ -1316,7 +1316,7 @@ export default function ChatPage() {
       : upcoming.kind === "anniversary" ? `Your anniversary is ${countdownLabel(upcoming.left)}.`
       : `${upcoming.title || "A special day"} is ${countdownLabel(upcoming.left)}.`
     : null;
-  const theirCycle = partner ? cycleMap[partner.id] : undefined;
+  const theirCycle = partner && partner.gender !== "man" ? cycleMap[partner.id] : undefined;
   const careP = theirCycle?.share ? predictCycle(theirCycle, today) : null;
   const careText = careP && partner
     ? careP.inPeriod ? `Day ${careP.periodDay} of ${partner.name}'s period. A little extra care goes a long way.`
@@ -1425,7 +1425,7 @@ export default function ChatPage() {
         <div className="dsec">
           <DrawerItem label="Feelings today" hint={myMood ? `You: ${moodOf(myMood)?.label}` : "Share how you feel"} onClick={() => openOnly("mood")}
             icon={<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18z" /></svg>} />
-          <DrawerItem label="Us, planned" hint="Special days, cycle, goals, talk" onClick={() => openOnly("planner")}
+          <DrawerItem label="Us, planned" hint={myGender === "man" ? "Special days, care, goals, talk" : "Special days, cycle, goals, talk"} onClick={() => openOnly("planner")}
             icon={<svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm12 7H5v10h14zm-7 2.2c.7-.8 2.6-.9 2.9.8.3 1.6-1.6 2.9-2.9 3.9-1.3-1-3.2-2.3-2.9-3.9.3-1.7 2.2-1.6 2.9-.8z" /></svg>} />
           <DrawerItem label="Play together" hint={gamesWaiting ? "A game is waiting for you" : "Games and cards"} badge={gamesWaiting} onClick={() => openOnly("games")}
             icon={<svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3A1.5 1.5 0 1 0 9 7.5 1.5 1.5 0 0 0 7.5 6zm9 0A1.5 1.5 0 1 0 18 7.5 1.5 1.5 0 0 0 16.5 6zM12 10.5A1.5 1.5 0 1 0 13.5 12 1.5 1.5 0 0 0 12 10.5zM7.5 15A1.5 1.5 0 1 0 9 16.5 1.5 1.5 0 0 0 7.5 15zm9 0a1.5 1.5 0 1 0 1.5 1.5 1.5 1.5 0 0 0-1.5-1.5z" /></svg>} />
@@ -1734,7 +1734,7 @@ export default function ChatPage() {
           onLive={(kind) => { setGamesOpen(false); setLiveOpen({ kind, id: live && live.kind === kind ? live.id : undefined }); }} />
       )}
       {plannerOpen && (
-        <Planner vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null}
+        <Planner vault={vault} me={{ id: me.id, name: me.name }} partner={partner ? { id: partner.id, name: partner.name } : null} myGender={myGender}
           today={today} onClose={() => setPlannerOpen(false)} onChanged={() => void syncNow()} onToast={setToast} />
       )}
 

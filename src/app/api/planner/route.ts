@@ -145,6 +145,8 @@ export async function POST(req: Request) {
 
     case "saveCycle": {
       if (!okCipher(b.iv, b.ct, 8000)) return fail("Invalid data");
+      const who = await sql`select gender from members where id = ${me.memberId}`;
+      if (who[0]?.gender === "man") return fail("Cycle tracking is on her side of the app.", 403);
       await sql`
         insert into cycles (member_id, space_id, iv, ciphertext) values (${me.memberId}, ${me.spaceId}, ${b.iv as string}, ${b.ct as string})
         on conflict (member_id) do update set iv = excluded.iv, ciphertext = excluded.ciphertext, updated_at = now()`;

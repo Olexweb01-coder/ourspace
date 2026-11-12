@@ -73,6 +73,22 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
     if (payload.t === "voice" && url && audio.current && !audio.current.src) { audio.current.src = url; audio.current.preload = "auto"; }
   }, [url, payload.t]);
 
+  // While a voice note plays, move the line and the dot smoothly (every frame, this bubble only).
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    const step = () => {
+      const el = audio.current;
+      if (el) {
+        const total = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : (payload.t === "voice" ? payload.duration : 0);
+        setProgress(total ? Math.min(1, el.currentTime / total) : 0);
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, payload]);
+
   if (expired) {
     return <div className="bubble bubble--once">This {NOUN[payload.t]} has expired.</div>;
   }
@@ -180,6 +196,18 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
       else el.pause();
     }
     const wave = payload.wave && payload.wave.length ? payload.wave : Array.from({ length: 40 }, (_, i) => 18 + ((i * 37) % 23));
+    const total = payload.duration;
+    // Tap or drag on the wave to skip (like WhatsApp). Stops the row's swipe-to-reply while you drag here.
+    async function seekTo(e: React.PointerEvent<HTMLSpanElement>) {
+      const box = e.currentTarget.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+      setProgress(f);
+      const el = audio.current;
+      if (!el) return;
+      if (!el.src) { const u = await load(); if (!u) return; el.src = u; }
+      const len = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : total;
+      if (len) el.currentTime = f * len;
+    }
     return (
       <div className="media" ref={holder}>
         <div className="voice">
@@ -188,12 +216,19 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
               ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
               : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>}
           </button>
-          <span className="voice__wave" aria-hidden="true">
+          <span className="voice__wave voice__wave--seek" role="slider" aria-label="Voice note position"
+            aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(progress * total)}
+            onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); void seekTo(e); }}
+            onPointerMove={(e) => { e.stopPropagation(); if (e.currentTarget.hasPointerCapture(e.pointerId)) void seekTo(e); }}
+            onPointerUp={(e) => e.stopPropagation()}
+            onPointerCancel={(e) => e.stopPropagation()}>
             {wave.map((h, i) => (
               <span key={i} className={i / wave.length < progress ? "on" : ""} style={{ height: `${Math.max(12, h)}%` }} />
             ))}
+            <i className="voice__line" aria-hidden="true"><b style={{ transform: `scaleX(${progress})` }} /></i>
+            <i className="voice__dot" aria-hidden="true" style={{ left: `${progress * 100}%` }} />
           </span>
-          <span className="voice__time">{loading ? "…" : clock(payload.duration)}</span>
+          <span className="voice__time">{loading ? "…" : playing || progress > 0 ? clock(progress * total) : clock(total)}</span>
           <audio
             ref={audio}
             preload="none"
@@ -201,9 +236,10 @@ export default function MediaBubble({ payload, media, vault, partnerName, meId, 
             onPause={() => setPlaying(false)}
             onEnded={() => { setPlaying(false); setProgress(0); }}
             onTimeUpdate={(e) => {
+              if (playing) return;   // while playing, the smooth loop above moves it
               const el = e.currentTarget;
-              const total = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : payload.duration;
-              setProgress(total ? Math.min(1, el.currentTime / total) : 0);
+              const len = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : payload.duration;
+              setProgress(len ? Math.min(1, el.currentTime / len) : 0);
             }}
           />
         </div>

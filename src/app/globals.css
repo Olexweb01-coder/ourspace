@@ -1450,3 +1450,10 @@ html.lite .shell[data-theme="blush"] .glass { background: rgba(255, 255, 255, 0.
 
 /* ---------- long chats: only the latest are drawn ---------- */
 .earlier { display: block; margin: 4px auto 12px; padding: 7px 16px; border-radius: 999px; color: var(--candle); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+
+/* ---------- voice note: a moving line and dot, tap or drag to skip ---------- */
+.voice__wave--seek { position: relative; cursor: pointer; touch-action: none; padding-bottom: 6px; }
+.voice__line { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
+.voice__line b { display: block; height: 100%; background: var(--candle); transform-origin: left center; will-change: transform; }
+.voice__dot { position: absolute; bottom: -3.5px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--candle); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25); pointer-events: none; }
+.shell[data-theme="blush"] .voice__line { background: rgba(59, 21, 38, 0.15); }

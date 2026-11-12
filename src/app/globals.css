@@ -1351,3 +1351,27 @@ button.notice { cursor: pointer; }
 .whatsnew__kicker { margin: 0; color: var(--candle); font-weight: 600; font-size: 0.85rem; }
 .whatsnew__title { margin: 4px 0 12px; font-family: var(--font-display), Georgia, serif; font-style: italic; font-weight: 500; font-size: 1.45rem; line-height: 1.2; }
 .whatsnew__list { margin: 0 0 16px; padding-left: 1.1em; display: flex; flex-direction: column; gap: 8px; color: var(--blush); font-size: 0.95rem; max-height: 50vh; overflow-y: auto; }
+
+/* ---------- together, stronger: floating hearts and a warmer glow everywhere ---------- */
+.together-air { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }   /* behind the messages (.list is 1) */
+.together-air span { position: absolute; bottom: -40px; color: var(--rose); opacity: 0; font-size: 14px; animation: drift 18s linear infinite; }
+.together-air span:nth-child(1) { left: 8%;  animation-delay: 0s;   font-size: 12px; }
+.together-air span:nth-child(2) { left: 22%; animation-delay: 6s;   font-size: 18px; animation-duration: 22s; }
+.together-air span:nth-child(3) { left: 36%; animation-delay: 11s;  font-size: 10px; }
+.together-air span:nth-child(4) { left: 50%; animation-delay: 3s;   font-size: 16px; animation-duration: 20s; color: var(--candle); }
+.together-air span:nth-child(5) { left: 63%; animation-delay: 14s;  font-size: 12px; }
+.together-air span:nth-child(6) { left: 75%; animation-delay: 8s;   font-size: 20px; animation-duration: 24s; }
+.together-air span:nth-child(7) { left: 87%; animation-delay: 1.5s; font-size: 11px; color: var(--candle); }
+.together-air span:nth-child(8) { left: 15%; animation-delay: 16s;  font-size: 15px; animation-duration: 21s; }
+.together-air span:nth-child(9) { left: 93%; animation-delay: 10s;  font-size: 13px; }
+@keyframes drift {
+  0% { transform: translate(0, 0) rotate(-8deg); opacity: 0; }
+  10% { opacity: 0.32; }
+  50% { transform: translate(14px, -55vh) rotate(8deg); }
+  90% { opacity: 0.22; }
+  100% { transform: translate(-10px, -110vh) rotate(-6deg); opacity: 0; }
+}
+.shell--together .drawer { box-shadow: inset -1px 0 0 rgba(246, 201, 127, 0.22), 12px 0 40px rgba(232, 138, 161, 0.14); }
+.shell--together .planner__head { box-shadow: 0 1px 0 rgba(246, 201, 127, 0.18); }
+.shell--together .chead__name { text-shadow: 0 0 18px rgba(246, 201, 127, 0.45); }
+@media (prefers-reduced-motion: reduce) { .together-air { display: none; } }

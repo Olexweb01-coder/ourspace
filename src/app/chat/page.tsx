@@ -1446,6 +1446,7 @@ export default function ChatPage() {
 
       <section className="pane">
         <div className="pane__bg" style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})` } : undefined} aria-hidden="true" />
+        {online && <div className="together-air" aria-hidden="true">{Array.from({ length: 9 }, (_, i) => <span key={i}>♥</span>)}</div>}
 
         <div className="pane__top" ref={topRef}>
           <Header
@@ -1894,7 +1895,7 @@ export default function ChatPage() {
           onClose={({ reason }) => { setActiveCall(null); if (reason === "no-media") setToast("Allow the microphone for Our Space in your browser settings, then call again."); void syncNow(); }} />
       )}
       {whatsNew && !updateReady && <WhatsNew entry={whatsNew} onClose={closeWhatsNew} />}
-      {arrived && partner && <div className="arrival" role="status">{partner.name} is here <span aria-hidden="true">♥</span></div>}
+      {arrived && partner && <div className="arrival" role="status">{partner.name} is here. You&apos;re both here <span aria-hidden="true">♥</span></div>}
       {photoOpen && partner && avatars[partner.id] && (
         <MediaViewer kind="photo" url={avatars[partner.id]} caption={partner.name} onClose={() => setPhotoOpen(false)} />
       )}

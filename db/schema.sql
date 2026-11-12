@@ -405,3 +405,6 @@ create table if not exists app_icons (
   png512      text not null,
   updated_at  timestamptz not null default now()
 );
+
+-- ===== Recording indicator (same as db/018_recording.sql) =====
+alter table members add column if not exists typing_kind text;

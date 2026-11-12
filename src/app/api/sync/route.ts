@@ -16,6 +16,10 @@ export async function GET(req: Request) {
   if (since && Number.isNaN(since.getTime())) return fail("Bad cursor");
 
   const sql = db();
+  // Who is recording a voice note: asked alongside (not inside) the transaction below, so that before the
+  // database has the typing_kind column this one check fails quietly and everything else still works.
+  const recordingQuery = sql`select id from members where space_id = ${me.spaceId} and typing_until > now() and typing_kind = 'recording'`
+    .then((r) => r, () => []);
   // Everything in ONE round trip to the database (fewer trips = faster on weak networks).
   const results = await sql.transaction([
     // unanswered calls become missed; abandoned calls end (same rules as lib/calls.ts)
@@ -88,6 +92,7 @@ export async function GET(req: Request) {
   ]);
 
   const [missedNow, , , , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows, callRows] = results;
+  const recordingRows = (await recordingQuery) as { id: string }[];
   for (const m of missedNow) after(() => pushTo(m.callee_id, { title: "Missed call", body: `You missed a ${m.kind} call.`, tag: "call" }));
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
@@ -107,6 +112,7 @@ export async function GET(req: Request) {
       lastNudgeAt: m.last_nudge_at,
       avatarMediaId: m.avatar_media_id,
       typing: m.typing === true,
+      recording: m.typing === true && recordingRows.some((r) => r.id === m.id),
       gender: m.gender ?? null,
     })),
     space: {

@@ -58,6 +58,7 @@ type Member = {
   notifications: "on" | "off" | "unknown"; lastSeenAt: string | null; lastNudgeAt: string | null;
   avatarMediaId: string | null;
   typing?: boolean;
+  recording?: boolean;   // recording a voice note right now
   gender?: Gender;
   notifyOff?: string[];
   notifyQuiet?: boolean;
@@ -525,6 +526,15 @@ export default function ChatPage() {
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
     };
   }, [ready, syncNow, lockOut]);
+
+  // ---------- "recording audio…" on her phone while you record a voice note ----------
+  useEffect(() => {
+    if (!recording) return;
+    const ping = () => { api("/api/typing", { body: { kind: "recording" } }).catch(() => {}); };
+    ping();
+    const t = setInterval(ping, 4000);
+    return () => { clearInterval(t); api("/api/typing", { body: { kind: "stop" } }).catch(() => {}); };
+  }, [recording]);
 
   // ---------- opening what a notification or card is about ----------
   useEffect(() => {
@@ -1665,7 +1675,8 @@ export default function ChatPage() {
     />
   );
 
-  const sub = typing ? <span className="typing">typing<i /><i /><i /></span>
+  const sub = partner?.recording ? <span className="typing typing--rec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z" /></svg>recording audio<i /><i /><i /></span>
+    : typing ? <span className="typing">typing<i /><i /><i /></span>
     : partner ? <>{sinceLabel(partner.lastSeenAt)}{partner.notifications === "off" && <span className="pill">notifications off</span>}</>
     : "hasn't joined yet";
 
@@ -1903,8 +1914,10 @@ export default function ChatPage() {
           })}
 
           {partner?.typing && (
-            <div className="row row--start typing-row" aria-live="polite" aria-label={`${partner.name} is typing`}>
-              <div className="b b--tail typing-b"><span /><span /><span /></div>
+            <div className="row row--start typing-row" aria-live="polite" aria-label={partner.recording ? `${partner.name} is recording a voice note` : `${partner.name} is typing`}>
+              {partner.recording
+                ? <div className="b b--tail typing-b typing-b--rec"><span className="rec-dot" /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z" /></svg></div>
+                : <div className="b b--tail typing-b"><span /><span /><span /></div>}
             </div>
           )}
         </div>

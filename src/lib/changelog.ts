@@ -4,13 +4,14 @@ export type ChangeEntry = { id: string; title: string; items: string[] };
 
 export const CHANGELOG: ChangeEntry[] = [
   {
-    id: "2026-11-12-lighter",
-    title: "Lighter on your phone",
+    id: "2026-11-12-smooth-voice",
+    title: "Lighter, smoother, and better voice notes",
     items: [
       "The same glow, hearts and glass, drawn with far less work, so your phone stays cooler.",
-      "The app does much less in the background while it's open.",
-      "New: Battery saver in Settings, under Chat, if you ever want it even lighter.",
       "Long chats stay smooth: the latest messages show first, and Show earlier messages brings back the rest.",
+      "Voice notes: a moving line shows where you are, the time counts up, and you can tap or drag to skip.",
+      "You see “recording audio…” while the other is recording a voice note, just like typing.",
+      "New: Battery saver in Settings, under Chat, if you ever want it even lighter.",
     ],
   },
   {

@@ -1457,3 +1457,13 @@ html.lite .shell[data-theme="blush"] .glass { background: rgba(255, 255, 255, 0.
 .voice__line b { display: block; height: 100%; background: var(--candle); transform-origin: left center; will-change: transform; }
 .voice__dot { position: absolute; bottom: -3.5px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--candle); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25); pointer-events: none; }
 .shell[data-theme="blush"] .voice__line { background: rgba(59, 21, 38, 0.15); }
+
+/* ---------- "recording audio…" ---------- */
+.typing--rec { align-items: center; gap: 3px; }
+.typing--rec svg { width: 14px; height: 14px; fill: #ff5d6c; margin-right: 2px; }
+.typing-b--rec { align-items: center; gap: 6px; }
+.typing-b--rec svg { width: 18px; height: 18px; fill: var(--candle); }
+.typing-b--rec .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff5d6c; animation: recpulse 1.2s ease-in-out infinite; }
+@keyframes recpulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .typing-b--rec .rec-dot { animation: none; opacity: 1; } }
+html.lite .typing-b--rec .rec-dot { animation: none; opacity: 1; }

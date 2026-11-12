@@ -882,7 +882,11 @@ export default function ChatPage() {
       }
       if (!job.uploaded) {
         const bytes = await job.getBytes();
-        await uploadEncrypted(v, bytes, "message", (pct) => setUpPct((x) => (x[job.tmp] === pct ? x : { ...x, [job.tmp]: pct })), job.mediaId);
+        // Progress moves the line in steps of 10%: about 10 redraws per file, not 100.
+        await uploadEncrypted(v, bytes, "message", (pct) => setUpPct((x) => {
+          const was = x[job.tmp] ?? 0;
+          return pct < 100 && pct - was < 10 ? x : { ...x, [job.tmp]: pct };
+        }), job.mediaId);
         job.uploaded = true;
       }
       const payload = payloads.current.get(job.tmp) as Payload;

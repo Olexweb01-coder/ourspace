@@ -4,6 +4,15 @@ export type ChangeEntry = { id: string; title: string; items: string[] };
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: "2026-11-12-lighter",
+    title: "Lighter on your phone",
+    items: [
+      "The same glow, hearts and glass, drawn with far less work, so your phone stays cooler.",
+      "The app does much less in the background while it's open.",
+      "New: Battery saver in Settings, under Chat, if you ever want it even lighter.",
+    ],
+  },
+  {
     id: "2026-11-12",
     title: "A big update for the two of you",
     items: [

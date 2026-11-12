@@ -117,6 +117,28 @@ const THEME_OPTIONS: { value: Theme; label: string }[] = [
 ];
 const NOUN: Record<string, string> = { photo: "Photo", video: "Video", voice: "Voice note", file: "File", text: "Message" };
 
+/** What the screen shows about each person's presence right now ("online", "last seen 2 min ago"). */
+function presenceOf(x: Info): string {
+  return x.members.map((m) => `${m.id}:${isOnline(m.lastSeenAt)}:${sinceLabel(m.lastSeenAt)}`).join("|");
+}
+
+/**
+ * Would the screen look the same? Last-seen times move every check, so they aren't compared directly: instead the
+ * presence the screen would show now is compared with what it shows. And if a newer last-seen means one of your
+ * messages has just been seen, it's a change straight away, so the ticks never lag.
+ */
+function sameView(a: Info | null, b: Info, lastMineAt: number, shownPresence: string): boolean {
+  if (!a) return false;
+  if (presenceOf(b) !== shownPresence) return false;
+  const strip = (x: Info) => JSON.stringify({ ...x, members: x.members.map((m) => ({ ...m, lastSeenAt: null })) });
+  if (strip(a) !== strip(b)) return false;
+  const t = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0);
+  for (const m of b.members) {
+    if (lastMineAt && t(a.members.find((x) => x.id === m.id)?.lastSeenAt) < lastMineAt && t(m.lastSeenAt) >= lastMineAt) return false;
+  }
+  return true;
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const vaultRef = useRef<Vault | null>(null);
@@ -203,6 +225,8 @@ export default function ChatPage() {
   const aboutAsked = useRef(false);
   const prevDone = useRef<boolean | null>(null);
   const saveCopyRef = useRef<() => void>(() => {});
+  const lastMineAt = useRef(0);   // when you last sent something (for the ticks)
+  const shownPresence = useRef("");   // the "online / last seen" the screen showed at its last redraw
   // Red badges: what notifications were about, kept until you open that part of the app.
   const [badges, setBadges] = useState<Partial<Record<Section, number>>>({});
   const badgeKey = (spaceId: string) => `ourspace:badges:${spaceId}`;
@@ -401,7 +425,8 @@ export default function ChatPage() {
       const q = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
       const data = await api<SyncResponse>(`/api/sync${q}`);
       cursor.current = data.now;
-      setInfo({ me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [], live: data.live ?? null });
+      const nextInfo: Info = { me: data.me, members: data.members, space: data.space, streak: data.streak, gamesWaiting: data.gamesWaiting ?? [], live: data.live ?? null };
+      setInfo((prev) => (sameView(prev, nextInfo, lastMineAt.current, shownPresence.current) ? prev : nextInfo));   // no redraw when nothing you'd see changed
       setLoadTrouble((t) => (t.count ? { count: 0, server: false } : t));
       if (data.calls) {
         setCalls((prev) => (JSON.stringify(prev) === JSON.stringify(data.calls) ? prev : data.calls!));
@@ -628,6 +653,12 @@ export default function ChatPage() {
     const el = listRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [visible.length, ready]);
+  useEffect(() => {
+    const mine = vaultRef.current?.memberId;
+    let last = 0;
+    for (const m of visible) if (m.senderId === mine && !m.id.startsWith("tmp-")) last = Math.max(last, new Date(m.createdAt).getTime());
+    lastMineAt.current = last;
+  }, [visible]);
 
   // Grow the message box with what you type (Safari doesn't support field-sizing yet).
   useEffect(() => {
@@ -1477,6 +1508,7 @@ export default function ChatPage() {
   const vault = vaultRef.current as Vault;
 
   const online = isOnline(partner?.lastSeenAt ?? null);
+  shownPresence.current = presenceOf(info);
   const partnerName = partner?.name ?? info.space.label;
   const showInstall = isIOS() && !isStandalone();
   const showNotifAsk = !showInstall && pushSupported() && notif !== "on";

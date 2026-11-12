@@ -101,7 +101,9 @@ type OnceView = { kind: "text"; text: string } | { kind: "photo" | "video" | "vo
 // The game tables (and the 3D library) load only when you open a game.
 const LiveGame = dynamic(() => import("@/components/live/LiveGame"), { ssr: false });
 
-const POLL_MS = 2500;
+// Checks run on a 2.4 s beat: every beat while she's here, every other beat (4.8 s) while she's away.
+// Stays under the server's 6 s "looking at the app" window, so you never get buzzed while it's open.
+const POLL_HALF_MS = 2400;
 const LOCK_AFTER_MS = 2 * 60 * 1000;
 const DISAPPEAR_OPTIONS: { value: number | null; label: string }[] = [
   { value: null, label: "Off" },
@@ -227,6 +229,7 @@ export default function ChatPage() {
   const saveCopyRef = useRef<() => void>(() => {});
   const lastMineAt = useRef(0);   // when you last sent something (for the ticks)
   const shownPresence = useRef("");   // the "online / last seen" the screen showed at its last redraw
+  const pollFast = useRef(true);
   // Red badges: what notifications were about, kept until you open that part of the app.
   const [badges, setBadges] = useState<Partial<Record<Section, number>>>({});
   const badgeKey = (spaceId: string) => `ourspace:badges:${spaceId}`;
@@ -474,7 +477,14 @@ export default function ChatPage() {
   useEffect(() => {
     if (!ready) return;
     void syncNow();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") void syncNow(); }, POLL_MS);
+    // Every 2.4 s while she's here (or typing); every 4.8 s while she's away. A notification still checks at once.
+    let tick = 0;
+    const timer = setInterval(() => {
+      tick += 1;
+      if (document.visibilityState !== "visible") return;
+      if (!pollFast.current && tick % 2 === 1) return;
+      void syncNow();
+    }, POLL_HALF_MS);
 
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
@@ -1509,6 +1519,7 @@ export default function ChatPage() {
 
   const online = isOnline(partner?.lastSeenAt ?? null);
   shownPresence.current = presenceOf(info);
+  pollFast.current = online || !!partner?.typing;
   const partnerName = partner?.name ?? info.space.label;
   const showInstall = isIOS() && !isStandalone();
   const showNotifAsk = !showInstall && pushSupported() && notif !== "on";

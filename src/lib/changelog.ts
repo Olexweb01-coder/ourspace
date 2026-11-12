@@ -10,6 +10,7 @@ export const CHANGELOG: ChangeEntry[] = [
       "The same glow, hearts and glass, drawn with far less work, so your phone stays cooler.",
       "The app does much less in the background while it's open.",
       "New: Battery saver in Settings, under Chat, if you ever want it even lighter.",
+      "Long chats stay smooth: the latest messages show first, and Show earlier messages brings back the rest.",
     ],
   },
   {

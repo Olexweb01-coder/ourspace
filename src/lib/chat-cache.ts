@@ -16,7 +16,16 @@ function open(): Promise<IDBDatabase> {
   });
 }
 
+// Started the moment the passcode is accepted, so the saved chat is already unlocked when the chat screen appears.
+let warm: { spaceId: string; p: Promise<unknown> } | null = null;
+export function warmCache(v: Vault) { warm = { spaceId: v.spaceId, p: readCache(v) }; }
+
 export async function loadCache<T>(v: Vault): Promise<T | null> {
+  if (warm && warm.spaceId === v.spaceId) { const p = warm.p; warm = null; return (await p) as T | null; }
+  return readCache<T>(v);
+}
+
+async function readCache<T>(v: Vault): Promise<T | null> {
   try {
     const db = await open();
     const rec = await new Promise<{ at: number; iv: string; ct: string } | undefined>((res, rej) => {

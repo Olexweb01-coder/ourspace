@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { warmCache } from "@/lib/chat-cache";
 import BondMark from "@/components/BondMark";
 import LockInput from "@/components/LockInput";
 import LockSetup from "@/components/LockSetup";
@@ -18,6 +19,8 @@ const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export default function UnlockPage() {
   const router = useRouter();
+  // Load the chat screen in the background while the passcode is typed, so opening is instant.
+  useEffect(() => { router.prefetch("/chat"); }, [router]);
   const [spaces, setSpaces] = useState<SavedSpace[] | null>(null);
   const [current, setCurrent] = useState<SavedSpace | null>(null);
   const [mode, setMode] = useState<"lock" | "password">("password");
@@ -86,6 +89,7 @@ export default function UnlockPage() {
     rememberSpace(s);
     const vault: Vault = { encKey: keys.encKey, master: keys.master, spaceId: s.spaceId, memberId: s.memberId };
     setVault(vault);
+    warmCache(vault);   // start unlocking the saved chat now, while the chat screen opens
     setPassword("");
     // After the shared password, offer a quicker lock for next time (once, unless skipped).
     if (viaPassword && !getLock(s.spaceId) && !lockSkipped(s.spaceId)) {

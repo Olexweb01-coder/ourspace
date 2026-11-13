@@ -303,10 +303,11 @@ export default function ChatPage() {
       const c = await loadCache<{ cursor: string; info: Info; messages: Msg[]; calls: CallRow[] }>(v);
       if (!c || !c.info || !Array.isArray(c.messages)) return;
       cursor.current = c.cursor;
+      // Unlock the words first, then show everything at once: no "Unlocking…" flashing in the bubbles.
+      await decryptList(c.messages);
       setInfo((cur) => cur ?? c.info);
       setCalls((cur) => (cur.length ? cur : c.calls ?? []));
       setMsgs((prev) => { const next = new Map(c.messages.map((m) => [m.id, m] as const)); prev.forEach((m, id) => next.set(id, m)); return next; });
-      await decryptList(c.messages);
     })();
     setReady(true);
     setLockKind(getLock(v.spaceId)?.kind ?? null);
@@ -1555,7 +1556,7 @@ export default function ChatPage() {
   if (!ready || !info || !me) {
     return (
       <main className="gate" aria-busy="true">
-        <span className="live__pulse" aria-hidden="true" />
+        {/* No spinner or dot: the chat appears the moment it's ready (a split second, from this phone). */}
         {loadTrouble.count >= 3 && (
           <>
             <p className="gate__lead">{loadTrouble.server ? "Our Space can't load right now. Still trying…" : "Waiting for the network. Still trying…"}</p>

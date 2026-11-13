@@ -4,7 +4,6 @@ const CACHE = "ourspace-static-v1";
 const PAGES_CACHE = "ourspace-pages-v1";
 // The app's own screens: the passcode screen and the chat. Saved on the phone (they contain no messages or keys).
 const PAGES = ["/", "/chat"];
-const NETWORK_WAIT_MS = 2000;   // use the internet if it answers this fast, else open from the phone at once
 
 const pageKey = (kind, path) => new Request(`${self.location.origin}/__saved/${kind}${path === "/" ? "/home" : path}`);
 
@@ -27,26 +26,22 @@ self.addEventListener("install", (event) => {
   event.waitUntil(saveAllPages());
 });
 
-// Network first, but never wait long: if the internet is slow or gone, open from the phone straight away.
+// Like an installed app: open from the phone at once, and quietly fetch a fresh copy for next time.
+// (New versions are announced in the app: "A new version is ready".) First ever open, or nothing saved: the internet.
 async function pageFromNetworkOrPhone(req, kind, path) {
   const cache = await caches.open(PAGES_CACHE);
-  const saved = () => cache.match(pageKey(kind, path), { ignoreVary: true })
-    .then((r) => r || (kind === "prefetch" ? cache.match(pageKey("data", path), { ignoreVary: true }) : r))
-    .then((r) => r || (kind === "page" ? cache.match(pageKey("page", "/"), { ignoreVary: true }) : r));
-  const fromNet = fetch(req).then(async (res) => {
+  const saved = await cache.match(pageKey(kind, path), { ignoreVary: true })
+    || (kind === "prefetch" ? await cache.match(pageKey("data", path), { ignoreVary: true }) : undefined);
+  const fresh = fetch(req).then(async (res) => {
     if (res.ok && res.type === "basic") await cache.put(pageKey(kind, path), res.clone());
     return res;
   });
-  const timeout = new Promise((ok) => setTimeout(() => ok("slow"), NETWORK_WAIT_MS));
+  if (saved) { fresh.catch(() => {}); return saved; }
   try {
-    const first = await Promise.race([fromNet, timeout]);
-    if (first !== "slow") return first;
-    const s = await saved();   // slow network: the saved copy now, the fresh one is saved for next time
-    if (s) { fromNet.catch(() => {}); return s; }
-    return await fromNet;
+    return await fresh;
   } catch (e) {
-    const s = await saved();   // no internet
-    if (s) return s;
+    const home = kind === "page" ? await cache.match(pageKey("page", "/"), { ignoreVary: true }) : undefined;
+    if (home) return home;
     throw e;
   }
 }

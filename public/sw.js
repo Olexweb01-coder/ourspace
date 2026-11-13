@@ -95,8 +95,23 @@ self.addEventListener("push", (event) => {
       const hit = await (await caches.open("ourspace-disguise")).match("/__disguise");
       if (hit) disguise = await hit.json();
     } catch (e) { disguise = null; }
-    await self.registration.showNotification(disguise ? disguise.name : title, {
-      body: disguise ? "You have a new notification." : (data.body || ""),
+    // The name you gave her, instead of her real name (set in the app, on this phone).
+    let shownTitle = title, shownBody = data.body || "";
+    if (!disguise) {
+      try {
+        const n = await (await caches.open("ourspace-disguise")).match("/__names");
+        if (n) {
+          const { from, to } = await n.json();
+          if (from && to) {
+            const re = new RegExp(`(^|[^\\p{L}])${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^\\p{L}])`, "gu");
+            shownTitle = shownTitle.replace(re, `$1${to}`);
+            shownBody = shownBody.replace(re, `$1${to}`);
+          }
+        }
+      } catch (e) { /* keep the real name */ }
+    }
+    await self.registration.showNotification(disguise ? disguise.name : shownTitle, {
+      body: disguise ? "You have a new notification." : shownBody,
       tag: (data.space ? data.space.slice(0, 8) + ":" : "") + (data.tag || "ourspace"),   // per space, so spaces never replace each other
       renotify: true,
       // A nudge is a call to come online: it stays on screen until tapped and buzzes like a heartbeat

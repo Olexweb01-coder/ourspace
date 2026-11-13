@@ -29,6 +29,7 @@ import Planner from "@/components/Planner";
 import { useUpdateReady, useWhatsNew, WhatsNew } from "@/components/UpdateNotice";
 import { SBlock, SGroup, SRow, SSwitch } from "@/components/settings/Rows";
 import DisguiseSettings from "@/components/settings/DisguiseSettings";
+import NicknameSettings from "@/components/settings/NicknameSettings";
 import { applyLite, isLite, setLite } from "@/lib/lite";
 import StreakSheet from "@/components/StreakSheet";
 import VoiceRecorder from "@/components/VoiceRecorder";
@@ -50,6 +51,7 @@ import { enableNotifications, clearSpaceNotifications, isIOS, isStandalone, push
 import { clearVault, getVault, savedSpaces, type Vault } from "@/lib/vault";
 import { isOpenTarget, sectionOfTag, type OpenTarget, type Section } from "@/lib/notify-open";
 import { eventText, stableId, validEvent, type EventInfo } from "@/lib/events";
+import { cleanNick, nickAad } from "@/lib/nickname";
 import EventCard from "@/components/chat/EventCard";
 
 type Reaction = string;   // "love", "angry", or any single emoji
@@ -59,6 +61,8 @@ type Member = {
   avatarMediaId: string | null;
   typing?: boolean;
   recording?: boolean;   // recording a voice note right now
+  nickIv?: string | null;   // what this person calls the other (encrypted)
+  nickCt?: string | null;
   gender?: Gender;
   notifyOff?: string[];
   notifyQuiet?: boolean;
@@ -150,7 +154,16 @@ export default function ChatPage() {
   const router = useRouter();
   const vaultRef = useRef<Vault | null>(null);
   const [ready, setReady] = useState(false);
-  const [info, setInfo] = useState<Info | null>(null);
+  const [rawInfo, setInfo] = useState<Info | null>(null);
+  // Nicknames: what each person calls the other, by the id of the person who chose it (decrypted on this phone).
+  const [nicks, setNicks] = useState<Record<string, string>>({});
+  // On your phone, your partner shows under the name you gave them; your own name never changes.
+  const info = useMemo(() => {
+    if (!rawInfo) return rawInfo;
+    const mine = nicks[rawInfo.me.id];
+    if (!mine) return rawInfo;
+    return { ...rawInfo, members: rawInfo.members.map((m) => (m.id !== rawInfo.me.id ? { ...m, name: mine } : m)) };
+  }, [rawInfo, nicks]);
   const [msgs, setMsgs] = useState<Map<string, Msg>>(() => new Map());
   const payloads = useRef(new Map<string, Payload | null>());
   const payloadIv = useRef(new Map<string, string>());   // which encrypted version each message was decrypted from
@@ -528,6 +541,63 @@ export default function ChatPage() {
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
     };
   }, [ready, syncNow, lockOut]);
+
+  // ---------- nicknames ----------
+  const nickKey = rawInfo ? rawInfo.members.map((m) => `${m.id}:${m.nickIv ?? ""}`).join("|") : "";
+  const theirNickSeen = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const v = vaultRef.current;
+    if (!v || !rawInfo) return;
+    let alive = true;
+    void (async () => {
+      const out: Record<string, string> = {};
+      for (const m of rawInfo.members) {
+        if (!m.nickIv || !m.nickCt) continue;
+        try {
+          const d = await decryptJSON<{ name?: string }>(v.encKey, m.nickIv, m.nickCt, nickAad(v.spaceId, m.id));
+          const n = cleanNick(d?.name ?? "");
+          if (n) out[m.id] = n;
+        } catch { /* not readable: show the real name */ }
+      }
+      if (!alive) return;
+      setNicks((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+      // She gave you a new name: tell you once (not on first load).
+      const them = rawInfo.members.find((m) => m.id !== rawInfo.me.id);
+      const now = them ? out[them.id] ?? null : null;
+      if (theirNickSeen.current !== undefined && now && now !== theirNickSeen.current) setToast(`${them!.name} now calls you “${now}” 💗`);
+      theirNickSeen.current = now;
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nickKey]);
+
+  async function saveNick(name: string | null) {
+    const v = vaultRef.current;
+    if (!v) return;
+    try {
+      const clean = name === null ? null : cleanNick(name);
+      const nickname = clean ? await encryptJSON(v.encKey, { name: clean }, nickAad(v.spaceId, v.memberId)) : null;
+      await api("/api/profile", { body: { nickname } });
+      setNicks((prev) => { const next = { ...prev }; if (clean) next[v.memberId] = clean; else delete next[v.memberId]; return next; });
+      setToast(clean ? `You call them “${clean}” now` : "Back to their own name");
+      void syncNow();
+    } catch (err) {
+      setToast(err instanceof ApiError ? err.message : "Couldn't save that name. Try again.");
+    }
+  }
+
+  // Notifications on this phone use the name you gave her, too.
+  useEffect(() => {
+    const realName = rawInfo?.members.find((m) => m.id !== rawInfo.me.id)?.name;
+    const mine = rawInfo ? nicks[rawInfo.me.id] : undefined;
+    void (async () => {
+      try {
+        const cache = await caches.open("ourspace-disguise");
+        if (realName && mine) await cache.put("/__names", new Response(JSON.stringify({ from: realName, to: mine }), { headers: { "Content-Type": "application/json" } }));
+        else await cache.delete("/__names");
+      } catch { /* not available */ }
+    })();
+  }, [rawInfo, nicks]);
 
   // ---------- "recording audio…" on her phone while you record a voice note ----------
   useEffect(() => {
@@ -1327,8 +1397,8 @@ export default function ChatPage() {
 
   // Keep the on-phone copy fresh (encrypted). Only when messages or calls actually change, a moment after the
   // last change, and once more when you leave the app. Never on every check: encrypting 300 messages is real work.
-  const latestForCache = useRef({ msgs, calls, info });
-  latestForCache.current = { msgs, calls, info };
+  const latestForCache = useRef({ msgs, calls, info: rawInfo });
+  latestForCache.current = { msgs, calls, info: rawInfo };   // the real names are saved; nicknames are applied on screen
   saveCopyRef.current = () => {
     const v = vaultRef.current;
     const { msgs: ms, calls: cs, info: inf } = latestForCache.current;
@@ -2071,6 +2141,10 @@ export default function ChatPage() {
               <SGroup title="Profile">
                 <SRow label="About you" onClick={() => setAboutOpen(true)}
                   hint={`${myGender ? (myGender === "woman" ? "Woman" : "Man") : "Not set"}${birthdayOf(me.id) ? `, birthday ${birthdayOf(me.id)!.day}/${birthdayOf(me.id)!.month}` : ""}`} />
+                {partner && rawInfo && (
+                  <NicknameSettings key={nicks[me.id] ?? ""} realName={rawInfo.members.find((m) => m.id === partner.id)?.name ?? partner.name}
+                    current={nicks[me.id] ?? ""} theirs={nicks[partner.id] ?? null} onSave={saveNick} />
+                )}
                 <SRow label="Your photo" hint={myAvatar ? "Shown to both of you" : "No photo yet"}>
                   <button className="btn btn--ghost btn--small" onClick={() => avatarInput.current?.click()} disabled={busySetting === "avatar"}>
                     {busySetting === "avatar" ? "Uploading…" : myAvatar ? "Change" : "Add"}

@@ -1,13 +1,14 @@
 import { db } from "@/lib/db";
 import { claimMedia } from "@/lib/media-server";
-import { fail, json, readJson } from "@/lib/server-utils";
+import { B64_RE, fail, json, readJson } from "@/lib/server-utils";
 import { getMe } from "@/lib/session";
 
-// Your profile: photo (shown in the joined circles) and whether you're a man or a woman (for "him" and "her").
+// Your profile: photo (shown in the joined circles), whether you're a man or a woman (for "him" and "her"),
+// and what you call your partner (a nickname, encrypted on your phone; the server can't read it).
 export async function POST(req: Request) {
   const me = await getMe();
   if (!me) return fail("Locked", 401);
-  const body = await readJson<{ avatarMediaId?: string | null; gender?: string | null }>(req);
+  const body = await readJson<{ avatarMediaId?: string | null; gender?: string | null; nickname?: { iv?: string; ct?: string } | null }>(req);
   if (!body) return fail("Invalid request");
   const sql = db();
 
@@ -19,6 +20,17 @@ export async function POST(req: Request) {
     if (g === "man") {
       await sql`delete from care_reminders where owner_id = ${me.memberId} and sent_at is null`;
       await sql`delete from cycles where member_id = ${me.memberId}`;
+    }
+  }
+
+  if ("nickname" in body) {
+    const n = body.nickname;
+    if (n === null) {
+      await sql`update members set nick_iv = null, nick_ct = null where id = ${me.memberId}`;
+    } else {
+      const ok = n && typeof n.iv === "string" && typeof n.ct === "string" && n.iv.length <= 32 && n.ct.length <= 400 && B64_RE.test(n.iv) && B64_RE.test(n.ct);
+      if (!ok) return fail("That name didn't work. Try a shorter one.");
+      await sql`update members set nick_iv = ${n!.iv!}, nick_ct = ${n!.ct!} where id = ${me.memberId}`;
     }
   }
 

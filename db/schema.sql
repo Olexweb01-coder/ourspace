@@ -408,3 +408,7 @@ create table if not exists app_icons (
 
 -- ===== Recording indicator (same as db/018_recording.sql) =====
 alter table members add column if not exists typing_kind text;
+
+-- ===== Nicknames (same as db/019_nicknames.sql) =====
+alter table members add column if not exists nick_iv text;
+alter table members add column if not exists nick_ct text;

@@ -20,6 +20,9 @@ export async function GET(req: Request) {
   // database has the typing_kind column this one check fails quietly and everything else still works.
   const recordingQuery = sql`select id from members where space_id = ${me.spaceId} and typing_until > now() and typing_kind = 'recording'`
     .then((r) => r, () => []);
+  // What each of you calls the other (encrypted). Also alongside, so it can't break anything before the database has it.
+  const nickQuery = sql`select id, nick_iv, nick_ct from members where space_id = ${me.spaceId} and nick_ct is not null`
+    .then((r) => r, () => []);
   // Everything in ONE round trip to the database (fewer trips = faster on weak networks).
   const results = await sql.transaction([
     // unanswered calls become missed; abandoned calls end (same rules as lib/calls.ts)
@@ -93,6 +96,7 @@ export async function GET(req: Request) {
 
   const [missedNow, , , , nowRows, messages, members, spaces, streakDays, todayRows, moods, specialDays, cycles, gamesWaiting, , statuses, liveRows, callRows] = results;
   const recordingRows = (await recordingQuery) as { id: string }[];
+  const nickRows = (await nickQuery) as { id: string; nick_iv: string; nick_ct: string }[];
   for (const m of missedNow) after(() => pushTo(m.callee_id, { title: "Missed call", body: `You missed a ${m.kind} call.`, tag: "call" }));
   const completeDays = streakDays.map((d) => d.day as string);
   const today = todayRows[0].today as string;
@@ -113,6 +117,8 @@ export async function GET(req: Request) {
       avatarMediaId: m.avatar_media_id,
       typing: m.typing === true,
       recording: m.typing === true && recordingRows.some((r) => r.id === m.id),
+      nickIv: nickRows.find((n) => n.id === m.id)?.nick_iv ?? null,
+      nickCt: nickRows.find((n) => n.id === m.id)?.nick_ct ?? null,
       gender: m.gender ?? null,
     })),
     space: {

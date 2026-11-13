@@ -15,6 +15,8 @@ export const CHANGELOG: ChangeEntry[] = [
       "Opens without internet: your passcode and your saved messages work offline, and anything you send goes when you're back.",
       "From your passcode straight into the chat: no waiting dot.",
       "Remind about love debts: a card in the chat, from Play together, under Love debts.",
+      "Nicknames: give each other a name in Settings, under Profile. You both see what you call each other.",
+      "Fixed: the reminder to turn on notifications no longer shows when they're already on.",
     ],
   },
   {

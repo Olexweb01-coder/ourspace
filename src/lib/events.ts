@@ -6,7 +6,8 @@ export type EventInfo =
   | { type: "live-invite"; kind: LiveKind; id: string }
   | { type: "live-result"; kind: LiveKind; id: string; winner: string; bet?: string }
   | { type: "quiz"; kind: "wyr" | "tot" | "know"; id: string }
-  | { type: "card"; deck: "truth" | "dare" | "deep"; text: string };
+  | { type: "card"; deck: "truth" | "dare" | "deep"; text: string }
+  | { type: "debt-remind"; items: string[]; more?: number };   // a nudge about love debts still unpaid
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const short = (x: unknown, max: number) => typeof x === "string" && x.length > 0 && x.length <= max;
@@ -21,6 +22,8 @@ export function validEvent(e: unknown): e is EventInfo {
       && typeof v.winner === "string" && UUID.test(v.winner) && (v.bet === undefined || short(v.bet, 300));
     case "quiz": return (v.kind === "wyr" || v.kind === "tot" || v.kind === "know") && typeof v.id === "string" && UUID.test(v.id);
     case "card": return (v.deck === "truth" || v.deck === "dare" || v.deck === "deep") && short(v.text, 600);
+    case "debt-remind": return Array.isArray(v.items) && v.items.length >= 1 && v.items.length <= 5 && v.items.every((x) => short(x, 300))
+      && (v.more === undefined || (Number.isInteger(v.more) && (v.more as number) > 0 && (v.more as number) < 1000));
     default: return false;
   }
 }
@@ -36,6 +39,7 @@ export function eventText(e: EventInfo, senderName: string, winnerName: string, 
     case "live-result": return `🏆 ${winnerName} won ${LIVE_TITLE[e.kind]}${e.bet ? `. ${loserName} owes: ${e.bet}` : ""}`;
     case "quiz": return `🎲 ${senderName} started ${QUIZ_TITLE[e.kind]}. Your turn`;
     case "card": return `${DECK_TITLE[e.deck]}: ${e.text}`;
+    case "debt-remind": return `💗 ${senderName} is reminding you of love debts: ${e.items.join(", ")}${e.more ? ` and ${e.more} more` : ""}`;
   }
 }
 

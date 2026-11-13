@@ -74,6 +74,17 @@ export default function Games({ vault, me, partner: joined, partnerLabel, onClos
     } catch { /* not critical */ }
   }, [vault]);
   useEffect(() => { void loadDebts(); }, [loadDebts]);
+  // A nudge in the chat about debts still unpaid (a card she can tap to see them). A short pause stops double-sends.
+  const [reminding, setReminding] = useState(false);
+  async function remind(list: Debt[]) {
+    if (!onEvent || !list.length) return;
+    setReminding(true);
+    const items = list.slice(0, 5).map((d) => d.text.slice(0, 300));
+    const ok = await onEvent({ type: "debt-remind", items, ...(list.length > 5 ? { more: list.length - 5 } : {}) });
+    onToast(ok ? `Reminder sent to ${theirName} 💗` : "Couldn't send the reminder.");
+    setTimeout(() => setReminding(false), 8000);
+  }
+
   // Opened from a debt notification or card: scroll to Love debts once they're there.
   useEffect(() => {
     if (focus !== "debts" || debts.length === 0) return;
@@ -181,7 +192,7 @@ export default function Games({ vault, me, partner: joined, partnerLabel, onClos
       </header>
       <div className="planner__body">
         {!games ? <p className="hint">Setting up the games…</p>
-          : view.screen === "home" ? <Home games={games} me={me} partner={partner} theirName={theirName} busy={busy} start={start} onLive={onLive} debts={debts} settle={settle} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
+          : view.screen === "home" ? <Home games={games} me={me} partner={partner} theirName={theirName} busy={busy} start={start} onLive={onLive} debts={debts} settle={settle} remind={onEvent ? remind : undefined} reminding={reminding} open={(g) => setView(g.mine ? (g.theirs ? { screen: "results", id: g.id } : { screen: "home" }) : { screen: "play", id: g.id })} deck={(d) => setView({ screen: "deck", deck: d })} nameOf={nameOf} />
           : view.screen === "play" && find(view.id) ? <Play key={view.id} game={find(view.id)!} me={me} partner={partner} busy={busy} submit={submit} nameOf={nameOf} />
           : view.screen === "results" && find(view.id) ? <Results game={find(view.id)!} me={me} partner={partner} nameOf={nameOf} remove={remove} />
           : view.screen === "deck" ? <Deck deck={view.deck} spaceId={vault.spaceId} partner={partner} onSendText={onSendText} onEvent={onEvent} onToast={onToast} />
@@ -196,11 +207,13 @@ function scoreOf(g: Game): number {
   return g.questions.reduce((n, _, i) => n + (g.mine![i] === g.theirs![i] ? 1 : 0), 0);
 }
 
-function Home({ games, me, partner, theirName, busy, start, open, deck, nameOf, onLive, debts, settle }: {
+function Home({ games, me, partner, theirName, busy, start, open, deck, nameOf, onLive, debts, settle, remind, reminding }: {
   games: Game[]; me: Person; partner: Person | null; theirName: string; busy: boolean; onLive: (k: "ludo" | "whot") => void;
   debts: Debt[]; settle: (d: Debt, a: "paid" | "forgive") => void;
+  remind?: (list: Debt[]) => void; reminding: boolean;   // a reminder card in the chat about debts still unpaid
   start: (k: GameKind) => void; open: (g: Game) => void; deck: (d: DeckKind) => void; nameOf: (id: string | null) => string;
 }) {
+  const unpaidToMe = debts.filter((d) => !d.paidAt && d.owedTo === me.id);
   const yourTurn = games.filter((g) => !g.mine);
   const waiting = games.filter((g) => g.mine && !g.partnerAnswered && !g.finishedAt);
   const done = games.filter((g) => g.mine && g.theirs).slice(0, 12);
@@ -246,6 +259,11 @@ function Home({ games, me, partner, theirName, busy, start, open, deck, nameOf, 
       {debts.length > 0 && (
         <section className="gsec" id="love-debts">
           <p className="sheet__title">Love debts</p>
+          {unpaidToMe.length >= 2 && remind && (
+            <button type="button" className="btn btn--ghost btn--small debt__remind-all" disabled={reminding} onClick={() => remind(unpaidToMe)}>
+              💗 Remind {theirName} about all {unpaidToMe.length}
+            </button>
+          )}
           {debts.slice(0, 12).map((d) => {
             const owedToMe = d.owedTo === me.id;
             return (
@@ -259,6 +277,7 @@ function Home({ games, me, partner, theirName, busy, start, open, deck, nameOf, 
                     <span className="debt__actions">
                       <button type="button" className="btn btn--small" onClick={() => settle(d, "paid")}>Paid</button>
                       <button type="button" className="link-btn link-btn--quiet" onClick={() => settle(d, "forgive")}>Let go</button>
+                      {remind && <button type="button" className="link-btn" disabled={reminding} onClick={() => remind([d])}>Remind</button>}
                     </span>
                   ) : <span className="debt__paid debt__paid--due">Due</span>}
               </div>

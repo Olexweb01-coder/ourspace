@@ -1049,11 +1049,12 @@ export default function ChatPage() {
     const iWon = ev.type === "live-result" && ev.winner === info.me.id;
     const payload: Payload = { t: "text", body: eventText(ev, meName, iWon ? meName : other, iWon ? other : meName), ev };
     try {
-      const clientId = ev.type === "card" ? crypto.randomUUID() : await stableId(`${ev.type}:${ev.id}`);
+      const clientId = ev.type === "card" || ev.type === "debt-remind" ? crypto.randomUUID() : await stableId(`${ev.type}:${ev.id}`);
       const tmp = `tmp-${clientId}`;
       if (payloads.current.has(tmp)) return true;   // already on its way
       const { iv, ct } = await encryptJSON(v.encKey, payload, messageAad(v.spaceId, v.memberId));
-      const o: Outgoing = { tmp, clientId, iv, ct, kind: "text", viewOnce: false, createdAt: new Date().toISOString(), quiet: ev.type !== "card" };
+      // A Truth/Dare card or a debt reminder is something you send her: it buzzes her phone like a message.
+      const o: Outgoing = { tmp, clientId, iv, ct, kind: "text", viewOnce: false, createdAt: new Date().toISOString(), quiet: ev.type !== "card" && ev.type !== "debt-remind" };
       payloads.current.set(tmp, payload);
       payloadIv.current.set(tmp, iv);
       addLocal(v, tmp, "text", { createdAt: o.createdAt, expiresAt: null }, iv, ct, false);
@@ -1070,6 +1071,7 @@ export default function ChatPage() {
     if (ev.type === "live-invite") { goTo(`live:${ev.kind}:${ev.id}`); return; }
     if (ev.type === "live-result") { goTo(ev.bet ? "debts" : "games"); return; }
     if (ev.type === "quiz") { setGamesFocus(null); setGamesGame(ev.id); openOnly("games"); return; }
+    if (ev.type === "debt-remind") { goTo("debts"); return; }
     openOnly("games");
   }
 

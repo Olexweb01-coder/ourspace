@@ -25,6 +25,12 @@ export default function EventCard({ ev, mine, meId, senderName, otherName, onOpe
       sub = mine ? `Waiting for ${otherName}` : "Your turn";
       action = mine ? "Open" : "Play";
       break;
+    case "debt-remind":
+      icon = "💗";
+      title = mine ? `You reminded ${otherName}` : `${senderName} is reminding you`;
+      sub = `${mine ? `${otherName} still owes` : "You still owe"}: ${ev.items.slice(0, 3).join(", ")}${ev.items.length > 3 || ev.more ? ` and ${(ev.items.length > 3 ? ev.items.length - 3 : 0) + (ev.more ?? 0)} more` : ""}`;
+      action = "See Love debts";
+      break;
     case "card":
       icon = ev.deck === "dare" ? "🔥" : ev.deck === "deep" ? "💭" : "💬";
       title = DECK_TITLE[ev.deck];

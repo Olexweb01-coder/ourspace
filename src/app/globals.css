@@ -1467,3 +1467,5 @@ html.lite .shell[data-theme="blush"] .glass { background: rgba(255, 255, 255, 0.
 @keyframes recpulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .typing-b--rec .rec-dot { animation: none; opacity: 1; } }
 html.lite .typing-b--rec .rec-dot { animation: none; opacity: 1; }
+.debt__remind-all { margin: 0 0 10px; }
+.evcard--debt-remind { box-shadow: inset 0 0 0 1px rgba(232, 138, 161, 0.5); }

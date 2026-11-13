@@ -1644,6 +1644,7 @@ export default function ChatPage() {
   // Small glass notices under the header, instead of big banners.
   type Notice = { key: string; text: string; tone?: "gold" | "care" | "warm" | "warn"; onClick?: () => void };
   const notices: Notice[] = [];
+  if (loadTrouble.count >= 2 && !loadTrouble.server) notices.push({ key: "offline", text: "Offline. These are your saved messages; anything you send goes as soon as you're back online." });
   if (updateReady) notices.push({ key: "upd", text: "A new version is ready. Tap to update", tone: "gold", onClick: () => window.location.reload() });
   if (partnerMood && partner) notices.push({ key: "pm", text: `${partner.name} feels ${partnerMood.label.toLowerCase()}. ${partnerMood.hint(partner.name)}`, tone: "warm" });
   if (partner && !myMood) notices.push({ key: "mm", text: "How are you feeling today?", tone: "gold", onClick: () => openOnly("mood") });

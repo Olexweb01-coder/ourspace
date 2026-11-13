@@ -1,13 +1,60 @@
-// Our Space service worker: push notifications + offline shell for static files.
+// Our Space service worker: push notifications + the app itself, saved on the phone so it opens without internet.
 // Notifications never contain message text; the server can't read it.
 const CACHE = "ourspace-static-v1";
+const PAGES_CACHE = "ourspace-pages-v1";
+// The app's own screens: the passcode screen and the chat. Saved on the phone (they contain no messages or keys).
+const PAGES = ["/", "/chat"];
+const NETWORK_WAIT_MS = 2000;   // use the internet if it answers this fast, else open from the phone at once
 
-self.addEventListener("install", () => self.skipWaiting());
+const pageKey = (kind, path) => new Request(`${self.location.origin}/__saved/${kind}${path === "/" ? "/home" : path}`);
+
+async function savePage(kind, path, res) {
+  if (!res || !res.ok || res.type !== "basic") return;
+  const cache = await caches.open(PAGES_CACHE);
+  await cache.put(pageKey(kind, path), res);
+}
+
+// Save both screens as soon as this helper is installed, so the very next open works offline.
+async function saveAllPages() {
+  await Promise.all(PAGES.map(async (path) => {
+    try { await savePage("page", path, await fetch(path, { cache: "no-store" })); } catch (e) { /* offline now: saved on next open */ }
+    try { await savePage("data", path, await fetch(path, { cache: "no-store", headers: { RSC: "1" } })); } catch (e) { /* same */ }
+  }));
+}
+
+self.addEventListener("install", (event) => {
+  self.skipWaiting();
+  event.waitUntil(saveAllPages());
+});
+
+// Network first, but never wait long: if the internet is slow or gone, open from the phone straight away.
+async function pageFromNetworkOrPhone(req, kind, path) {
+  const cache = await caches.open(PAGES_CACHE);
+  const saved = () => cache.match(pageKey(kind, path), { ignoreVary: true })
+    .then((r) => r || (kind === "prefetch" ? cache.match(pageKey("data", path), { ignoreVary: true }) : r))
+    .then((r) => r || (kind === "page" ? cache.match(pageKey("page", "/"), { ignoreVary: true }) : r));
+  const fromNet = fetch(req).then(async (res) => {
+    if (res.ok && res.type === "basic") await cache.put(pageKey(kind, path), res.clone());
+    return res;
+  });
+  const timeout = new Promise((ok) => setTimeout(() => ok("slow"), NETWORK_WAIT_MS));
+  try {
+    const first = await Promise.race([fromNet, timeout]);
+    if (first !== "slow") return first;
+    const s = await saved();   // slow network: the saved copy now, the fresh one is saved for next time
+    if (s) { fromNet.catch(() => {}); return s; }
+    return await fromNet;
+  } catch (e) {
+    const s = await saved();   // no internet
+    if (s) return s;
+    throw e;
+  }
+}
 
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k !== CACHE && k !== "ourspace-disguise").map((k) => caches.delete(k)));
+    await Promise.all(keys.filter((k) => k !== CACHE && k !== PAGES_CACHE && k !== "ourspace-disguise").map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -18,6 +65,15 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // The app's screens (and the data the app loads when moving between them): open even without internet.
+  if (PAGES.includes(url.pathname)) {
+    const isData = req.headers.get("RSC") === "1";
+    if (req.mode === "navigate" || isData) {
+      const kind = !isData ? "page" : req.headers.get("Next-Router-Prefetch") ? "prefetch" : "data";
+      event.respondWith(pageFromNetworkOrPhone(req, kind, url.pathname));
+      return;
+    }
+  }
   if (!url.pathname.startsWith("/_next/static/") && !url.pathname.startsWith("/icons/")) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);

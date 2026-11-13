@@ -12,6 +12,7 @@ export const CHANGELOG: ChangeEntry[] = [
       "Voice notes: a moving line shows where you are, the time counts up, and you can tap or drag to skip.",
       "You see “recording audio…” while the other is recording a voice note, just like typing.",
       "New: Battery saver in Settings, under Chat, if you ever want it even lighter.",
+      "Opens without internet: your passcode and your saved messages work offline, and anything you send goes when you're back.",
     ],
   },
   {

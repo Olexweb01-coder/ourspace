@@ -227,6 +227,7 @@ export default function ChatPage() {
   const [activeCall, setActiveCall] = useState<{ id: string; role: "caller" | "callee"; kind: "voice" | "video" } | null>(null);
   const handledCalls = useRef(new Set<string>());
   const [notifPrompt, setNotifPrompt] = useState(false);
+  const [notifChecked, setNotifChecked] = useState(false);   // the phone has told us whether notifications are on
   const notifAsked = useRef(false);
   const [canSwitch, setCanSwitch] = useState(false);
   const aboutAsked = useRef(false);
@@ -323,7 +324,7 @@ export default function ChatPage() {
       void (async () => { await decryptList(waiting.map((o) => ({ id: o.tmp, senderId: v.memberId, kind: o.kind, viewOnce: o.viewOnce, viewedAt: null, deleted: false, reactions: {}, expiresAt: null, createdAt: o.createdAt, iv: o.iv, ct: o.ct, media: null }))); waiting.forEach((o) => void deliver(o)); })();
     }
     void clearSpaceNotifications(v.spaceId).then(addBadges);
-    void reportNotificationState().then(setNotif);
+    void reportNotificationState().then((x) => { setNotif(x); setNotifChecked(true); });
   }, [router]);
 
   // Signs in again in the background using the unlocked key; only if that fails do we ask for the password.
@@ -1317,11 +1318,12 @@ export default function ChatPage() {
     return () => { window.removeEventListener("pointerdown", mark, true); window.removeEventListener("keydown", mark, true); };
   }, []);
   useEffect(() => {
-    if (notifAsked.current || notif === "on" || !hasPartner || aboutOpen) return;
+    // Only once the phone has answered: deciding earlier showed the reminder even with notifications on.
+    if (!notifChecked || notifAsked.current || notif === "on" || !hasPartner || aboutOpen) return;
     notifAsked.current = true;
     if (!interacted.current && !draft) setNotifPrompt(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notif, hasPartner, aboutOpen]);
+  }, [notif, notifChecked, hasPartner, aboutOpen]);
 
   // Keep the on-phone copy fresh (encrypted). Only when messages or calls actually change, a moment after the
   // last change, and once more when you leave the app. Never on every check: encrypting 300 messages is real work.
